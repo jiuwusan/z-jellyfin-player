@@ -120,9 +120,13 @@ function card(id,mode="poster"){
  const name=episode?parentName(i):i.name;
  const detail=episode?epLabel(i)+(resume?"":" · "+i.name):i.type+" · "+i.year;
  const watchTime=resume?'<span class="sub watchTime">'+time(records[id])+" / "+time(i.length)+'</span>':"";
- return '<button class="card" data-detail="'+id+'">'+
- '<span class="cover '+(landscape?"landscape":"")+'">'+art(i.art)+(resume?'<span class="resumeShade"></span><span class="resumeMark" aria-hidden="true">▶</span>'+progress(id):"")+'</span>'+
+ const details='<button class="card" data-detail="'+id+'">'+
+ '<span class="cover '+(landscape?"landscape":"")+'">'+art(i.art)+(resume?'<span class="resumeShade"></span>'+progress(id):"")+'</span>'+
  '<span class="cardCopy"><span class="name">'+esc(name)+'</span><span class="sub">'+esc(detail)+'</span>'+watchTime+'</span></button>';
+ if(!landscape)return details;
+ const playLabel=(resume?"继续观看 ":"播放 ")+name+(episode?" "+epLabel(i):"");
+ return '<div class="quickPlayCard">'+details+'<div class="quickPlayOverlay"><button class="quickPlayButton" type="button"'+
+ ' data-play="'+id+'" data-position="'+(resume?records[id]:0)+'" aria-label="'+esc(playLabel)+'"><span class="quickPlayIcon" aria-hidden="true">▶</span></button></div></div>';
 }
 function rail(ids,mode){
  return '<div class="rail '+(mode||"poster")+'" tabindex="0">'+ids.map(id=>card(id,mode)).join("")+'</div>';
@@ -191,7 +195,7 @@ function player(){
  '<p class="sub">'+esc(i.parent?epLabel(i)+" · "+i.name:"")+'</p>'+
  '<p class="helper">播放上限 · '+esc(resolution)+'／'+esc(bitrate)+'</p><div class="playerbar">'+
  '<button class="secondary" data-toggle-player>'+(!playing?"播放":"暂停")+'</button><input type="range" id="seek" min="0" max="'+i.length+'" value="'+playTime+'" aria-label="播放进度"><span class="sub" id="times">'+time(playTime)+' / '+time(i.length)+'</span></div>'+
- '<div style="margin-top:15px">'+openButton("返回详情","data-back")+'</div>';
+ '<div style="margin-top:15px">'+openButton(stack.at(-1)?.page==="home"?"返回首页":"返回详情","data-back")+'</div>';
 }
 function splash(){
  return '<button class="splashStage" data-tab="home" type="button" aria-label="结束开屏预览并进入首页">'+

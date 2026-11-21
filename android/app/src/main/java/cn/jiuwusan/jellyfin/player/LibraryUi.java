@@ -95,7 +95,8 @@ final class LibraryUi {
 
     interface ItemAction { void open(JellyfinApi.Item item); }
 
-    HorizontalScrollView rail(List<JellyfinApi.Item> items, boolean wide, boolean progress, int gutter, ItemAction action) {
+    HorizontalScrollView rail(List<JellyfinApi.Item> items, boolean wide, boolean progress, int gutter,
+                              ItemAction details, ItemAction play) {
         HorizontalScrollView scroll = new HorizontalScrollView(context);
         scroll.setHorizontalScrollBarEnabled(false);
         scroll.setClipToPadding(false);
@@ -110,7 +111,8 @@ final class LibraryUi {
             JellyfinApi.Item item = items.get(i);
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(width), -2);
             if (i > 0) params.setMarginStart(dp(12));
-            row.addView(card(item, wide, progress, dp(width), progress ? 14 : 11, () -> action.open(item)), params);
+            Runnable quickPlay = play == null ? null : () -> play.open(item);
+            row.addView(card(item, wide, progress, dp(width), () -> details.open(item), quickPlay), params);
         }
         return scroll;
     }
@@ -136,11 +138,12 @@ final class LibraryUi {
             JellyfinApi.Item item = items.get(i);
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(width, -2);
             if (i % columns > 0) params.setMarginStart(gap);
-            row.addView(card(item, false, false, width, 11, () -> action.open(item)), params);
+            row.addView(card(item, false, false, width, () -> action.open(item), null), params);
         }
     }
 
-    private View card(JellyfinApi.Item item, boolean wide, boolean progress, int width, int radius, Runnable action) {
+    private View card(JellyfinApi.Item item, boolean wide, boolean progress, int width, Runnable details, Runnable play) {
+        int radius = progress ? 14 : 11;
         LinearLayout tile = column();
         FrameLayout cover = picture(item, wide, progress ? 0 : radius);
         int imageWidth = width;
@@ -186,13 +189,16 @@ final class LibraryUi {
             info.setEllipsize(TextUtils.TruncateAt.END);
             copy.addView(info);
         }
+        if (play != null) {
+            String description = (progress ? "继续观看 " : "播放 ") + name + (episode.isEmpty() ? "" : " " + episode);
+            addQuickPlayButton(cover, imageHeight, progress, description, play);
+        }
         if (progress) {
-            addResumeMark(cover, imageHeight);
             if (item.durationMs > 0) positionBar(cover, item.resumeMs, item.durationMs);
             String watchTime = time(item.resumeMs) + (item.durationMs > 0 ? " / " + time(item.durationMs) : "");
             copy.addView(label(watchTime, 11, MUTED, false));
         }
-        actionable(tile, action);
+        actionable(tile, details);
         return tile;
     }
 
@@ -249,21 +255,28 @@ final class LibraryUi {
         return cover;
     }
 
-    private void addResumeMark(FrameLayout cover, int imageHeight) {
-        View shade = new View(context);
-        shade.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[] { Color.TRANSPARENT, 0xe805090c }));
-        cover.addView(shade, new FrameLayout.LayoutParams(-1, Math.round(imageHeight * 0.57f), Gravity.BOTTOM));
+    private void addQuickPlayButton(FrameLayout cover, int imageHeight, boolean progress, String description, Runnable action) {
+        if (progress) {
+            View shade = new View(context);
+            shade.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                    new int[] { Color.TRANSPARENT, 0xe805090c }));
+            cover.addView(shade, new FrameLayout.LayoutParams(-1, Math.round(imageHeight * 0.57f), Gravity.BOTTOM));
+        }
         TextView play = label("▶", 13, TEXT, false);
         play.setGravity(Gravity.CENTER);
         play.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         GradientDrawable badge = rounded(0x80101010, 17);
         badge.setStroke(dp(1), 0x80ffffff);
         play.setBackground(badge);
-        FrameLayout.LayoutParams bounds = new FrameLayout.LayoutParams(dp(34), dp(34), Gravity.BOTTOM | Gravity.END);
-        bounds.setMarginEnd(dp(10));
-        bounds.bottomMargin = dp(15);
-        cover.addView(play, bounds);
+        FrameLayout button = new FrameLayout(context);
+        button.setContentDescription(description);
+        button.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
+        button.addView(play, new FrameLayout.LayoutParams(dp(34), dp(34), Gravity.CENTER));
+        actionable(button, action);
+        FrameLayout.LayoutParams bounds = new FrameLayout.LayoutParams(dp(48), dp(48), Gravity.BOTTOM | Gravity.END);
+        bounds.setMarginEnd(dp(3));
+        bounds.bottomMargin = dp(progress ? 8 : 3);
+        cover.addView(button, bounds);
     }
 
     private void positionBar(FrameLayout frame, long position, long duration) {

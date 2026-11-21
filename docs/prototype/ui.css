@@ -159,10 +159,18 @@ main.pad[data-screen="library"] { padding-top: 0; }
 .resume .cover { border: 0; border-radius: 0; }
 .resume .cardCopy { display: grid; gap: 3px; padding: 9px 11px 11px; }
 .resume .name { margin: 0; font-size: 16px; }
+.quickPlayCard { position: relative; min-width: 0; scroll-snap-align: start; }
+.quickPlayOverlay { position: absolute; inset: 1px 1px auto; aspect-ratio: 16 / 9; pointer-events: none; }
+.quickPlayButton {
+  position: absolute; inset: auto 5px 10px auto; width: 44px; height: 44px;
+  display: grid; place-items: center; padding: 0; border-radius: 50%;
+  background: transparent; pointer-events: auto;
+}
 .watchTime { font-variant-numeric: tabular-nums; font-size: 11px; color: var(--sub); }
 .resumeShade { position: absolute; inset: 43% 0 0; background: linear-gradient(transparent, #05090ce8); }
-.resumeMark {
-  position: absolute; inset: auto 10px 15px auto;
+.next-up .quickPlayOverlay { inset: 0 0 auto; }
+.next-up .quickPlayButton { bottom: 5px; }
+.quickPlayIcon {
   width: 34px; height: 34px; display: grid; place-items: center;
   color: var(--text); background: #10101080; border: 1px solid #ffffff80;
   border-radius: 50%; font-size: 13px;

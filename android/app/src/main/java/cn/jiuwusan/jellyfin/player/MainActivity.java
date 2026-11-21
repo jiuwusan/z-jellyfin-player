@@ -2,6 +2,7 @@ package cn.jiuwusan.jellyfin.player;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.pm.ActivityInfo;
 import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.graphics.Typeface;
@@ -9,6 +10,7 @@ import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.LayerDrawable;
 import android.graphics.drawable.StateListDrawable;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -21,6 +23,8 @@ import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewTreeObserver;
+import android.view.WindowInsets;
+import android.view.WindowInsetsController;
 import android.view.WindowManager;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
@@ -47,7 +51,6 @@ import androidx.media3.exoplayer.analytics.AnalyticsListener;
 import androidx.media3.exoplayer.mediacodec.MediaCodecInfo;
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector;
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
-import androidx.media3.ui.PlayerView;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -68,7 +71,11 @@ public final class MainActivity extends Activity {
     private JellyfinApi api;
     private JellyfinApi.Stream stream;
     private ExoPlayer player;
-    private TextView status;
+    private boolean fullscreenPlayback;
+    private int previousOrientation;
+    private int previousSystemUi;
+    private int previousBarsBehavior;
+    private int previousCutoutMode;
     private int page;
     private int seasonRequest;
     private String device;
@@ -485,8 +492,11 @@ public final class MainActivity extends Activity {
                         else state.setText("暂无未看完的影片。");
                     } else {
                         list.removeView(state);
-                        list.addView(libraryUi.rail(items, shelf.wide, shelf == HomeShelf.RESUME, contentGutter(),
-                                item -> openItem(item, this::homePage)));
+                        boolean resume = shelf == HomeShelf.RESUME;
+                        LibraryUi.ItemAction play = shelf == HomeShelf.LATEST ? null
+                                : item -> playbackPage(item, resume ? item.resumeMs : 0, this::homePage);
+                        list.addView(libraryUi.rail(items, shelf.wide, resume, contentGutter(),
+                                item -> openItem(item, this::homePage), play));
                     }
                     Log.i(JellyfinApi.TAG, "Home shelf=" + shelf.name() + " items=" + items.size());
                 });
@@ -1047,14 +1057,12 @@ public final class MainActivity extends Activity {
             stopPlayback();
             back.run();
         };
-        LinearLayout view = panel("", false, close);
-        toolbar(view, "正在播放", close, false, 0);
-        view.addView(libraryUi.label(displayTitle(item), 18, LibraryUi.TEXT, true));
-        int expected = page;
-        status = text(view, "正在向服务端请求视频…");
-        status.setTextSize(12);
-        PlayerView video = new PlayerView(this);
-        view.addView(video, new LinearLayout.LayoutParams(-1, 0, 1));
+        int expected = ++page;
+        backAction = close;
+        FullscreenPlaybackView screen = new FullscreenPlaybackView(this, libraryUi, displayTitle(item), close);
+        setContentView(screen);
+        enterFullscreenPlayback();
+        screen.requestApplyInsets();
         JellyfinApi connection = api;
         android.util.DisplayMetrics metrics = getResources().getDisplayMetrics();
         PlaybackPolicy policy = PlaybackPolicy.fromSettings(settings.resolution, settings.bitrate,
@@ -1062,14 +1070,14 @@ public final class MainActivity extends Activity {
         worker.execute(() -> {
             try {
                 JellyfinApi.Stream resolved = connection.stream(item, policy);
-                onPage(expected, () -> startPlayback(resolved, video, resumeMs));
+                onPage(expected, () -> startPlayback(resolved, screen, resumeMs));
             } catch (Exception error) {
-                onPage(expected, () -> status.setText(message(error, "无法获取视频")));
+                onPage(expected, () -> screen.showMessage(message(error, "无法获取视频")));
             }
         });
     }
 
-    private void startPlayback(JellyfinApi.Stream resolved, PlayerView video, long resumeMs) {
+    private void startPlayback(JellyfinApi.Stream resolved, FullscreenPlaybackView screen, long resumeMs) {
         stream = resolved;
         playbackStarted = false;
         DefaultRenderersFactory renderers = new DefaultRenderersFactory(this)
@@ -1085,39 +1093,22 @@ public final class MainActivity extends Activity {
                 .setDefaultRequestProperties(Collections.singletonMap("Authorization", api.authorization()));
         player = new ExoPlayer.Builder(this, renderers)
                 .setMediaSourceFactory(new DefaultMediaSourceFactory(data)).build();
-        video.setPlayer(player);
+        screen.video.setPlayer(player);
         player.addAnalyticsListener(new AnalyticsListener() {
-            private String decoder;
-            private Format format;
-            private boolean firstFrame;
-            private void update() {
-                if (stream != resolved) return;
-                String line = (resolved.constrained ? "服务端转码 · " : "") + (format == null ? "等待画面" :
-                        format.sampleMimeType + " · " + format.width + "×" + format.height +
-                        (format.frameRate > 0 ? " · " + format.frameRate + " fps" : ""));
-                status.setText(line + (decoder == null ? "" : "\n硬解 · " + decoder) +
-                        (firstFrame ? " · 已出首帧" : ""));
-            }
             @Override public void onVideoDecoderInitialized(EventTime time, String name, long at, long duration) {
-                decoder = name;
                 Log.i(JellyfinApi.TAG, "Hardware decoder=" + name);
-                update();
             }
             @Override public void onVideoInputFormatChanged(EventTime time, Format input, DecoderReuseEvaluation reuse) {
-                format = input;
                 Log.i(JellyfinApi.TAG, "Input mime=" + input.sampleMimeType + " size=" + input.width + "x" + input.height
                         + " fps=" + input.frameRate + " averageBitrate=" + input.averageBitrate);
-                update();
             }
             @Override public void onRenderedFirstFrame(EventTime time, Object output, long renderTimeMs) {
-                if (!firstFrame && stream == resolved) {
-                    firstFrame = true;
-                    playbackStarted = true;
-                    Log.i(JellyfinApi.TAG, "First frame rendered");
-                    report("");
-                    ui.postDelayed(progress, 10_000);
-                }
-                update();
+                if (stream != resolved || playbackStarted) return;
+                playbackStarted = true;
+                screen.showVideo();
+                Log.i(JellyfinApi.TAG, "First frame rendered");
+                report("");
+                ui.postDelayed(progress, 10_000);
             }
         });
         player.addListener(new Player.Listener() {
@@ -1127,7 +1118,7 @@ public final class MainActivity extends Activity {
             @Override public void onPlayerError(PlaybackException error) {
                 String code = error.getErrorCodeName();
                 Log.w(JellyfinApi.TAG, "Playback error " + code);
-                if (stream == resolved) status.setText("播放失败 · " + code);
+                if (stream == resolved) screen.showMessage("播放失败 · " + code);
             }
         });
         MediaItem.Builder item = new MediaItem.Builder().setUri(resolved.url.toString());
@@ -1136,6 +1127,66 @@ public final class MainActivity extends Activity {
         if (resumeMs > 0) Log.i(JellyfinApi.TAG, "Requested resume position ms=" + resumeMs);
         player.prepare();
         player.play();
+    }
+
+    private void enterFullscreenPlayback() {
+        fullscreenPlayback = true;
+        previousOrientation = getRequestedOrientation();
+        previousSystemUi = getWindow().getDecorView().getSystemUiVisibility();
+        if (Build.VERSION.SDK_INT >= 28) {
+            WindowManager.LayoutParams window = getWindow().getAttributes();
+            previousCutoutMode = window.layoutInDisplayCutoutMode;
+            window.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+            getWindow().setAttributes(window);
+        }
+        if (Build.VERSION.SDK_INT >= 30) {
+            WindowInsetsController controller = getWindow().getInsetsController();
+            previousBarsBehavior = controller == null ? WindowInsetsController.BEHAVIOR_DEFAULT
+                    : controller.getSystemBarsBehavior();
+            getWindow().setDecorFitsSystemWindows(false);
+        }
+        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
+        hidePlaybackSystemBars();
+    }
+
+    private void hidePlaybackSystemBars() {
+        if (Build.VERSION.SDK_INT >= 30) {
+            WindowInsetsController controller = getWindow().getInsetsController();
+            if (controller != null) {
+                controller.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+                controller.hide(WindowInsets.Type.systemBars());
+                return;
+            }
+        }
+        getWindow().getDecorView().setSystemUiVisibility(previousSystemUi
+                | View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_FULLSCREEN
+                | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
+    }
+
+    private void exitFullscreenPlayback() {
+        if (!fullscreenPlayback) return;
+        fullscreenPlayback = false;
+        if (Build.VERSION.SDK_INT >= 28) {
+            WindowManager.LayoutParams window = getWindow().getAttributes();
+            window.layoutInDisplayCutoutMode = previousCutoutMode;
+            getWindow().setAttributes(window);
+        }
+        getWindow().getDecorView().setSystemUiVisibility(previousSystemUi);
+        if (Build.VERSION.SDK_INT >= 30) {
+            getWindow().setDecorFitsSystemWindows(true);
+            WindowInsetsController controller = getWindow().getInsetsController();
+            if (controller != null) {
+                controller.setSystemBarsBehavior(previousBarsBehavior);
+                controller.show(WindowInsets.Type.systemBars());
+            }
+        }
+        if (!isFinishing()) setRequestedOrientation(previousOrientation);
+    }
+
+    @Override public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus && fullscreenPlayback) hidePlaybackSystemBars();
     }
 
     private void report(String event) {
@@ -1162,6 +1213,7 @@ public final class MainActivity extends Activity {
             player.release();
             player = null;
         }
+        exitFullscreenPlayback();
     }
 
     @Override public void onBackPressed() {
