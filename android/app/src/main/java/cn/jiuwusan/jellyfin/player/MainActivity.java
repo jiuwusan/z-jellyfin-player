@@ -3,11 +3,16 @@ package cn.jiuwusan.jellyfin.player;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.res.ColorStateList;
+import android.graphics.Color;
+import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.Drawable;
+import android.graphics.drawable.LayerDrawable;
 import android.graphics.drawable.StateListDrawable;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.text.Editable;
 import android.text.InputType;
 import android.text.TextUtils;
@@ -98,6 +103,10 @@ public final class MainActivity extends Activity {
         super.onCreate(state);
         getWindow().setStatusBarColor(LibraryUi.BACKGROUND);
         getWindow().setNavigationBarColor(LibraryUi.BACKGROUND);
+        StartupSplashView splash = new StartupSplashView(this, libraryUi);
+        setContentView(splash);
+        long splashReadyAt = SystemClock.uptimeMillis() + splash.animateIdentity();
+        int launchPage = ++page;
         device = getPreferences(0).getString("device", null);
         if (device == null) {
             device = UUID.randomUUID().toString();
@@ -105,10 +114,14 @@ public final class MainActivity extends Activity {
         }
         try {
             settings = ConnectionSettings.load(this);
-            if (settings != null) connect(settings, false);
-            else settingsPage("");
+            if (settings == null) {
+                afterSplash(launchPage, splashReadyAt, () -> settingsPage(""));
+            } else {
+                ui.postDelayed(() -> onPage(launchPage, () -> splash.showConnectionStatus(() -> settingsPage(""))), 1600);
+                connect(settings, false, splashReadyAt);
+            }
         } catch (Exception error) {
-            settingsPage("无法读取已保存的配置，请重新填写。");
+            afterSplash(launchPage, splashReadyAt, () -> settingsPage("无法读取已保存的配置，请重新填写。"));
         }
     }
 
@@ -137,7 +150,7 @@ public final class MainActivity extends Activity {
             ScrollView scroller = new ScrollView(this);
             scroller.setFillViewport(true);
             content = column();
-            if (nav != null) content.setPadding(contentGutter(), dp(16), contentGutter(), dp(24));
+            if (nav != null) content.setPadding(contentGutter(), dp(19), contentGutter(), dp(30));
             scroller.addView(content);
             root.addView(scroller, new LinearLayout.LayoutParams(-1, 0, 1));
         }
@@ -155,18 +168,16 @@ public final class MainActivity extends Activity {
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPadding(gutter, 0, gutter, 0);
-        row.setBackgroundColor(0xff1a1522);
+        row.setBackgroundColor(LibraryUi.PANEL);
         root.addView(row, new LinearLayout.LayoutParams(-1, dp(61)));
         if (back != null) toolbarButton(row, "‹", "返回", back);
         boolean home = "Jellyfin".equals(title) && back == null;
         if (home) {
-            TextView mark = libraryUi.label("▶", 14, LibraryUi.ON_ACCENT, true);
-            mark.setGravity(Gravity.CENTER);
-            mark.setBackground(libraryUi.rounded(LibraryUi.ACCENT, 10));
-            mark.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-            row.addView(mark, new LinearLayout.LayoutParams(dp(29), dp(29)));
+            LinearLayout.LayoutParams logoBounds = new LinearLayout.LayoutParams(dp(38), dp(38));
+            logoBounds.setMarginStart(-dp(5));
+            row.addView(libraryUi.brandMark(), logoBounds);
         }
-        TextView heading = libraryUi.label(title, back == null ? 22 : 17, LibraryUi.TEXT, true);
+        TextView heading = libraryUi.label(title, home ? 22 : 16, LibraryUi.TEXT, true);
         heading.setSingleLine();
         heading.setEllipsize(android.text.TextUtils.TruncateAt.END);
         heading.setPadding(back != null || home ? dp(10) : 0, 0, dp(4), 0);
@@ -181,7 +192,9 @@ public final class MainActivity extends Activity {
         TextView button = libraryUi.label(icon, 23, LibraryUi.TEXT, true);
         button.setContentDescription(description);
         button.setGravity(Gravity.CENTER);
-        button.setBackground(libraryUi.rounded(LibraryUi.PANEL, 14));
+        GradientDrawable background = libraryUi.rounded(0x0cffffff, 12);
+        background.setStroke(dp(1), 0x0fffffff);
+        button.setBackground(background);
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(44), dp(44));
         if (row.getChildCount() != 0) params.setMarginStart(dp(8));
         row.addView(button, params);
@@ -193,24 +206,24 @@ public final class MainActivity extends Activity {
         divider.setBackgroundColor(LibraryUi.LINE);
         root.addView(divider, new LinearLayout.LayoutParams(-1, dp(1)));
         LinearLayout row = new LinearLayout(this);
-        row.setBackgroundColor(0xff211929);
-        row.setPadding(dp(8), dp(8), dp(8), dp(9));
+        row.setBackgroundColor(LibraryUi.PANEL);
+        row.setPadding(dp(10), dp(6), dp(10), dp(7));
         root.addView(row, new LinearLayout.LayoutParams(-1, -2));
         for (BrowseTab tab : BrowseTab.values()) {
             boolean active = tab == selected;
-            int color = active ? LibraryUi.ACCENT : LibraryUi.MUTED;
+            int color = active ? LibraryUi.ACCENT_LIGHT : LibraryUi.MUTED;
             LinearLayout target = column();
             target.setGravity(Gravity.CENTER);
-            target.setMinimumHeight(dp(48));
+            target.setMinimumHeight(dp(53));
             target.setContentDescription(tab.title);
             target.setSelected(active);
             row.addView(target, new LinearLayout.LayoutParams(0, -2, 1));
             TextView icon = libraryUi.label(tab.icon, 19, color, true);
             icon.setGravity(Gravity.CENTER);
-            if (active) icon.setBackground(libraryUi.rounded(0xff4e3a5d, 14));
+            if (active) icon.setBackground(libraryUi.rounded(LibraryUi.SELECTED, 16));
             icon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-            target.addView(icon, new LinearLayout.LayoutParams(dp(51), dp(26)));
-            TextView label = libraryUi.label(tab.title, 13, color, active);
+            target.addView(icon, new LinearLayout.LayoutParams(dp(53), dp(28)));
+            TextView label = libraryUi.label(tab.title, 12, color, active);
             label.setGravity(Gravity.CENTER);
             label.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
             LinearLayout.LayoutParams labelParams = new LinearLayout.LayoutParams(-1, -2);
@@ -295,7 +308,7 @@ public final class MainActivity extends Activity {
         input.setMinHeight(dp(44));
         input.setBackgroundTintList(new ColorStateList(
                 new int[][] { { android.R.attr.state_focused }, {} },
-                new int[] { LibraryUi.ACCENT, 0xff746283 }));
+                new int[] { LibraryUi.ACCENT, 0xff575757 }));
         return input;
     }
 
@@ -312,7 +325,7 @@ public final class MainActivity extends Activity {
         spinner.setAdapter(adapter);
         spinner.setSelection(selection);
         spinner.setContentDescription(title);
-        spinner.setBackgroundTintList(ColorStateList.valueOf(0xff746283));
+        spinner.setBackgroundTintList(ColorStateList.valueOf(0xff575757));
         spinner.setPopupBackgroundDrawable(libraryUi.rounded(LibraryUi.PANEL, 12));
         group.addView(spinner, new LinearLayout.LayoutParams(-1, dp(44)));
         return spinner;
@@ -321,8 +334,8 @@ public final class MainActivity extends Activity {
     private void confirmSettings(ConnectionSettings candidate) {
         LinearLayout body = column();
         body.setPadding(dp(21), dp(21), dp(21), dp(21));
-        GradientDrawable backdrop = libraryUi.rounded(LibraryUi.PANEL, 21);
-        backdrop.setStroke(dp(1), 0xff594662);
+        GradientDrawable backdrop = libraryUi.rounded(LibraryUi.PANEL, 18);
+        backdrop.setStroke(dp(1), 0xff454545);
         body.setBackground(backdrop);
         body.addView(libraryUi.label("确认保存设置", 20, LibraryUi.TEXT, true));
         EditText confirmation = settingsField(body, "确认密码", "", true);
@@ -330,7 +343,7 @@ public final class MainActivity extends Activity {
         confirmation.setBackground(inputOutline());
         confirmation.setPadding(dp(11), dp(8), dp(11), dp(8));
         TextView error = text(body, "");
-        error.setTextColor(0xffffbecb);
+        error.setTextColor(LibraryUi.ERROR);
         error.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         error.setVisibility(View.GONE);
         AlertDialog dialog = new AlertDialog.Builder(this).setView(body).create();
@@ -365,9 +378,9 @@ public final class MainActivity extends Activity {
     private StateListDrawable inputOutline() {
         StateListDrawable background = new StateListDrawable();
         int[] states = { android.R.attr.state_activated, android.R.attr.state_focused };
-        int[] colors = { 0xffffbecb, LibraryUi.MINT, 0xff55435f };
+        int[] colors = { LibraryUi.ERROR, LibraryUi.ACCENT_LIGHT, 0xff484848 };
         for (int i = 0; i < colors.length; i++) {
-            GradientDrawable shape = libraryUi.rounded(0xff1d1626, 9);
+            GradientDrawable shape = libraryUi.rounded(LibraryUi.INPUT, 9);
             shape.setStroke(dp(1), colors[i]);
             background.addState(i < states.length ? new int[] { states[i] } : new int[0], shape);
         }
@@ -375,16 +388,22 @@ public final class MainActivity extends Activity {
     }
 
     private void connect(ConnectionSettings candidate, boolean save) {
-        LinearLayout view = panel("正在连接 Jellyfin", false, () -> settingsPage(""));
+        connect(candidate, save, 0);
+    }
+
+    private void connect(ConnectionSettings candidate, boolean save, long splashReadyAt) {
+        if (splashReadyAt == 0) {
+            LinearLayout view = panel("正在连接 Jellyfin", false, () -> settingsPage(""));
+            text(view, "通过家庭 HTTP 代理连接。");
+            button(view, "连接设置", () -> settingsPage(""));
+        }
         int expected = page;
-        status = text(view, "通过家庭 HTTP 代理连接。");
-        button(view, "连接设置", () -> settingsPage(""));
         worker.execute(() -> {
             try {
                 JellyfinApi connected = new JellyfinApi(candidate, device);
                 connected.login();
                 if (save) candidate.save(this);
-                onPage(expected, () -> {
+                afterSplash(expected, splashReadyAt, () -> {
                     settings = candidate;
                     draft = null;
                     api = connected;
@@ -393,12 +412,18 @@ public final class MainActivity extends Activity {
                     if (save) Toast.makeText(this, "设置已保存，连接成功", Toast.LENGTH_SHORT).show();
                 });
             } catch (Exception error) {
-                onPage(expected, () -> {
+                afterSplash(expected, splashReadyAt, () -> {
                     draft = candidate;
                     connectionFailed(candidate, save, error);
                 });
             }
         });
+    }
+
+    private void afterSplash(int expected, long readyAt, Runnable action) {
+        ui.postAtTime(() -> {
+            if (expected == page && !isFinishing() && !isDestroyed()) action.run();
+        }, Math.max(SystemClock.uptimeMillis(), readyAt));
     }
 
     private void connectionFailed(ConnectionSettings candidate, boolean save, Exception error) {
@@ -412,7 +437,7 @@ public final class MainActivity extends Activity {
         stopPlayback();
         browseTab = BrowseTab.HOME;
         LinearLayout view = panel("Jellyfin", true, null, browseTab);
-        view.setPadding(0, dp(16), 0, dp(24));
+        view.setPadding(0, dp(19), 0, dp(30));
         for (HomeShelf shelf : HomeShelf.values()) {
             LinearLayout group = column();
             LinearLayout.LayoutParams groupParams = new LinearLayout.LayoutParams(-1, -2);
@@ -528,13 +553,13 @@ public final class MainActivity extends Activity {
         HorizontalScrollView tabs = new HorizontalScrollView(this);
         tabs.setHorizontalScrollBarEnabled(false);
         LinearLayout row = new LinearLayout(this);
-        row.setPadding(contentGutter() + dp(4), dp(20), contentGutter(), dp(21));
+        row.setPadding(contentGutter(), dp(19), contentGutter(), dp(12));
         tabs.addView(row);
         root.addView(tabs, root.indexOfChild(content), new LinearLayout.LayoutParams(-1, -2));
         view.setPadding(contentGutter(), 0, contentGutter(), dp(24));
         for (LibraryLocation location : catalog.tabs) {
-            TextView chip = addChip(row, location.folder == null ? "全部" : location.folder.title);
-            selectChip(chip, location == catalog.selected);
+            TextView chip = addLibraryTab(row, location.folder == null ? "全部" : location.folder.title,
+                    location == catalog.selected);
             libraryUi.actionable(chip, () -> {
                 if (location == catalog.selected) return;
                 catalog.selected.scrollY = content.getScrollY();
@@ -702,15 +727,15 @@ public final class MainActivity extends Activity {
     private void showDetails(LinearLayout pageView, JellyfinApi.Item item, Runnable back, String seasonId) {
         pageView.setPadding(0, 0, 0, dp(24));
         int screenDp = getResources().getConfiguration().screenWidthDp;
-        int coverHeight = Math.max(216, Math.min(254, Math.round(screenDp * 0.66f)));
+        int coverHeight = Math.max(218, Math.min(270, Math.round(screenDp * 0.66f)));
         pageView.addView(libraryUi.hero(item), new LinearLayout.LayoutParams(-1, dp(coverHeight)));
         LinearLayout view = column();
         view.setPadding(contentGutter(), 0, contentGutter(), 0);
         LinearLayout.LayoutParams body = new LinearLayout.LayoutParams(-1, -2);
-        body.topMargin = -dp(33);
+        body.topMargin = -dp(44);
         pageView.addView(view, body);
         boolean episode = !item.seriesName.isEmpty();
-        int titleSize = Math.max(30, Math.min(36, Math.round(screenDp * 0.08f)));
+        int titleSize = Math.max(30, Math.min(38, Math.round(screenDp * 0.08f)));
         TextView title = libraryUi.label(episode ? item.seriesName : item.title, titleSize, LibraryUi.TEXT, true);
         title.setIncludeFontPadding(false);
         view.addView(title, new LinearLayout.LayoutParams(-1, -2));
@@ -904,6 +929,29 @@ public final class MainActivity extends Activity {
         });
     }
 
+    private TextView addLibraryTab(LinearLayout row, String title, boolean selected) {
+        TextView tab = libraryUi.label(title, 14, selected ? LibraryUi.ACCENT_LIGHT : LibraryUi.MUTED, selected);
+        tab.setSingleLine();
+        tab.setSelected(selected);
+        tab.setGravity(Gravity.CENTER);
+        tab.setPadding(dp(2), 0, dp(2), 0);
+        tab.setMinWidth(dp(44));
+        tab.setMinHeight(dp(44));
+        if (selected) {
+            GradientDrawable line = libraryUi.rounded(LibraryUi.ACCENT_LIGHT, 2);
+            LayerDrawable marker = new LayerDrawable(new Drawable[] { line });
+            marker.setLayerSize(0, dp(18), dp(2));
+            marker.setLayerGravity(0, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+            marker.setLayerInsetBottom(0, dp(3));
+            tab.setBackground(marker);
+        }
+        int gap = Math.max(14, Math.min(23, Math.round(getResources().getConfiguration().screenWidthDp * 0.04f)));
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-2, -2);
+        params.setMarginEnd(dp(gap));
+        row.addView(tab, params);
+        return tab;
+    }
+
     private TextView addChip(LinearLayout row, String title) {
         TextView tab = libraryUi.label(title, 13, LibraryUi.TEXT, true);
         tab.setGravity(Gravity.CENTER);
@@ -925,9 +973,10 @@ public final class MainActivity extends Activity {
 
     private void selectChip(TextView tab, boolean selected) {
         tab.setSelected(selected);
-        tab.setTextColor(selected ? LibraryUi.ON_ACCENT : LibraryUi.TEXT);
-        GradientDrawable background = libraryUi.rounded(selected ? LibraryUi.ACCENT : LibraryUi.PANEL, 24);
-        background.setStroke(dp(1), selected ? LibraryUi.ACCENT : LibraryUi.LINE);
+        tab.setTextColor(selected ? LibraryUi.ACCENT_LIGHT : LibraryUi.MUTED);
+        tab.setTypeface(Typeface.DEFAULT, selected ? Typeface.BOLD : Typeface.NORMAL);
+        GradientDrawable background = libraryUi.rounded(selected ? LibraryUi.SELECTED : LibraryUi.SURFACE, 23);
+        background.setStroke(dp(1), selected ? 0x9200a4dc : LibraryUi.LINE);
         tab.setBackground(background);
     }
 
@@ -987,9 +1036,9 @@ public final class MainActivity extends Activity {
     }
 
     private void watched(LinearLayout parent) {
-        TextView badge = libraryUi.label("✓ 已看完", 11, LibraryUi.MINT, true);
+        TextView badge = libraryUi.label("✓ 已看完", 11, LibraryUi.ACCENT_LIGHT, true);
         badge.setPadding(dp(8), dp(5), dp(8), dp(5));
-        badge.setBackground(libraryUi.rounded(0xff293f3b, 15));
+        badge.setBackground(libraryUi.rounded(LibraryUi.SELECTED, 15));
         parent.addView(badge, new LinearLayout.LayoutParams(-2, -2));
     }
 
@@ -1186,7 +1235,7 @@ public final class MainActivity extends Activity {
         button.setText(title);
         button.setAllCaps(false);
         button.setTextColor(primary ? LibraryUi.ON_ACCENT : LibraryUi.TEXT);
-        GradientDrawable background = libraryUi.rounded(primary ? LibraryUi.ACCENT : 0xff37283f, 13);
+        GradientDrawable background = libraryUi.rounded(primary ? LibraryUi.ACCENT : LibraryUi.PANEL, 10);
         if (!primary) background.setStroke(dp(1), LibraryUi.LINE);
         button.setBackground(background);
         button.setTextSize(14);

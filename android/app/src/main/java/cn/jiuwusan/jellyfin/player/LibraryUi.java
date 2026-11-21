@@ -24,14 +24,18 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 final class LibraryUi {
-    static final int BACKGROUND = 0xff16121d;
-    static final int PANEL = 0xff241c2e;
-    static final int LINE = 0xff45364f;
-    static final int TEXT = 0xfffaf3fc;
-    static final int MUTED = 0xffd1c2d9;
-    static final int ACCENT = 0xffe4c5ff;
-    static final int ON_ACCENT = 0xff271731;
-    static final int MINT = 0xffb5e7d7;
+    static final int BACKGROUND = 0xff101010;
+    static final int PANEL = 0xff202020;
+    static final int SURFACE = 0xff181818;
+    static final int INPUT = 0xff292929;
+    static final int LINE = 0x23ffffff;
+    static final int TEXT = Color.WHITE;
+    static final int MUTED = 0xffb8b8b8;
+    static final int ACCENT = 0xff00a4dc;
+    static final int ACCENT_LIGHT = 0xff59c7ed;
+    static final int ON_ACCENT = 0xff061820;
+    static final int SELECTED = 0x2500a4dc;
+    static final int ERROR = 0xffffabad;
 
     private final Context context;
     private final Handler main;
@@ -68,6 +72,14 @@ final class LibraryUi {
         return view;
     }
 
+    ImageView brandMark() {
+        ImageView mark = new ImageView(context);
+        mark.setImageResource(R.drawable.brand_mark);
+        mark.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        mark.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        return mark;
+    }
+
     GradientDrawable rounded(int color, int radius) {
         GradientDrawable drawable = new GradientDrawable();
         drawable.setColor(color);
@@ -77,7 +89,7 @@ final class LibraryUi {
 
     void actionable(View view, Runnable action) {
         view.setFocusable(true);
-        view.setForeground(new RippleDrawable(ColorStateList.valueOf(0x30dfc0ff), null, rounded(Color.WHITE, 14)));
+        view.setForeground(new RippleDrawable(ColorStateList.valueOf(0x3059c7ed), null, rounded(Color.WHITE, 12)));
         view.setOnClickListener(ignored -> action.run());
     }
 
@@ -90,14 +102,15 @@ final class LibraryUi {
         LinearLayout row = new LinearLayout(context);
         row.setPadding(gutter, dp(3), gutter, dp(6));
         int screenDp = context.getResources().getConfiguration().screenWidthDp;
-        int width = wide ? Math.max(143, Math.min(169, Math.round(screenDp * 0.42f)))
-                : Math.max(100, Math.min(118, Math.round(screenDp * 0.29f)));
+        int width = progress ? Math.max(223, Math.min(282, Math.round(screenDp * 0.68f)))
+                : wide ? Math.max(143, Math.min(178, Math.round(screenDp * 0.45f)))
+                : Math.max(100, Math.min(117, Math.round(screenDp * 0.28f)));
         scroll.addView(row, new FrameLayout.LayoutParams(-2, -2));
         for (int i = 0; i < items.size(); i++) {
             JellyfinApi.Item item = items.get(i);
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(width), -2);
             if (i > 0) params.setMarginStart(dp(12));
-            row.addView(card(item, wide, progress, dp(width), 14, () -> action.open(item)), params);
+            row.addView(card(item, wide, progress, dp(width), progress ? 14 : 11, () -> action.open(item)), params);
         }
         return scroll;
     }
@@ -117,29 +130,47 @@ final class LibraryUi {
             if (i % columns == 0) {
                 row = new LinearLayout(context);
                 LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
-                params.bottomMargin = dp(20);
+                params.bottomMargin = dp(22);
                 target.addView(row, params);
             }
             JellyfinApi.Item item = items.get(i);
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(width, -2);
             if (i % columns > 0) params.setMarginStart(gap);
-            row.addView(card(item, false, false, width, 12, () -> action.open(item)), params);
+            row.addView(card(item, false, false, width, 11, () -> action.open(item)), params);
         }
     }
 
     private View card(JellyfinApi.Item item, boolean wide, boolean progress, int width, int radius, Runnable action) {
         LinearLayout tile = column();
-        FrameLayout cover = picture(item, wide, radius);
-        GradientDrawable outline = rounded(Color.TRANSPARENT, radius);
-        outline.setStroke(dp(1), 0x19ffffff);
-        cover.setForeground(outline);
-        tile.addView(cover, new LinearLayout.LayoutParams(-1, width * (wide ? 9 : 24) / 16));
+        FrameLayout cover = picture(item, wide, progress ? 0 : radius);
+        int imageWidth = width;
+        if (progress) {
+            GradientDrawable surface = rounded(SURFACE, radius);
+            surface.setStroke(dp(1), LINE);
+            tile.setBackground(surface);
+            tile.setClipToOutline(true);
+            int border = dp(1);
+            tile.setPadding(border, border, border, border);
+            imageWidth -= 2 * border;
+        } else {
+            GradientDrawable outline = rounded(Color.TRANSPARENT, radius);
+            outline.setStroke(dp(1), 0x18ffffff);
+            cover.setForeground(outline);
+        }
+        int imageHeight = Math.max(1, imageWidth * (wide ? 9 : 24) / 16);
+        tile.addView(cover, new LinearLayout.LayoutParams(-1, imageHeight));
+        LinearLayout copy = tile;
+        if (progress) {
+            copy = column();
+            copy.setPadding(dp(11), dp(9), dp(11), dp(11));
+            tile.addView(copy);
+        }
         String name = item.seriesName.isEmpty() ? item.title : item.seriesName;
-        TextView title = label(name, 14, TEXT, true);
+        TextView title = label(name, progress ? 16 : 14, TEXT, true);
         title.setMaxLines(2);
         title.setEllipsize(TextUtils.TruncateAt.END);
-        title.setPadding(dp(1), dp(6), dp(1), 0);
-        tile.addView(title);
+        if (!progress) title.setPadding(0, dp(7), 0, 0);
+        copy.addView(title);
         String episode = (item.season > 0 ? "第 " + item.season + " 季" : "")
                 + (item.index > 0 ? (item.season > 0 ? " · " : "") + "第 " + item.index + " 集" : "");
         String episodeTitle = episodeTitle(item);
@@ -153,13 +184,13 @@ final class LibraryUi {
             TextView info = label(subtitle, 12, MUTED, false);
             info.setMaxLines(2);
             info.setEllipsize(TextUtils.TruncateAt.END);
-            tile.addView(info);
+            copy.addView(info);
         }
         if (progress) {
-            addResumeMark(cover);
+            addResumeMark(cover, imageHeight);
             if (item.durationMs > 0) positionBar(cover, item.resumeMs, item.durationMs);
             String watchTime = time(item.resumeMs) + (item.durationMs > 0 ? " / " + time(item.durationMs) : "");
-            tile.addView(label(watchTime, 12, MUTED, false));
+            copy.addView(label(watchTime, 11, MUTED, false));
         }
         actionable(tile, action);
         return tile;
@@ -214,31 +245,33 @@ final class LibraryUi {
     FrameLayout hero(JellyfinApi.Item item) {
         FrameLayout cover = picture(item, true, 0);
         cover.setForeground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[] { 0x0016121d, 0x2016121d, BACKGROUND }));
+                new int[] { 0x00101010, 0x40101010, BACKGROUND }));
         return cover;
     }
 
-    private void addResumeMark(FrameLayout cover) {
+    private void addResumeMark(FrameLayout cover, int imageHeight) {
         View shade = new View(context);
         shade.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[] { Color.TRANSPARENT, 0xe816121d }));
-        cover.addView(shade, new FrameLayout.LayoutParams(-1, dp(46), Gravity.BOTTOM));
-        TextView play = label("▶", 11, TEXT, false);
+                new int[] { Color.TRANSPARENT, 0xe805090c }));
+        cover.addView(shade, new FrameLayout.LayoutParams(-1, Math.round(imageHeight * 0.57f), Gravity.BOTTOM));
+        TextView play = label("▶", 13, TEXT, false);
         play.setGravity(Gravity.CENTER);
         play.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        GradientDrawable badge = rounded(0xd916121d, 14);
+        GradientDrawable badge = rounded(0x80101010, 17);
         badge.setStroke(dp(1), 0x80ffffff);
         play.setBackground(badge);
-        FrameLayout.LayoutParams bounds = new FrameLayout.LayoutParams(dp(28), dp(28), Gravity.BOTTOM | Gravity.END);
-        bounds.setMarginEnd(dp(9));
-        bounds.bottomMargin = dp(16);
+        FrameLayout.LayoutParams bounds = new FrameLayout.LayoutParams(dp(34), dp(34), Gravity.BOTTOM | Gravity.END);
+        bounds.setMarginEnd(dp(10));
+        bounds.bottomMargin = dp(15);
         cover.addView(play, bounds);
     }
 
     private void positionBar(FrameLayout frame, long position, long duration) {
         FrameLayout.LayoutParams bounds = new FrameLayout.LayoutParams(-1, dp(4), Gravity.BOTTOM);
-        bounds.setMargins(dp(9), 0, dp(9), dp(7));
-        frame.addView(watchProgress(position, duration), bounds);
+        bounds.setMargins(dp(10), 0, dp(10), dp(7));
+        ProgressBar bar = watchProgress(position, duration);
+        bar.setProgressBackgroundTintList(ColorStateList.valueOf(0x60ffffff));
+        frame.addView(bar, bounds);
     }
 
     ProgressBar watchProgress(long position, long duration) {
@@ -246,7 +279,7 @@ final class LibraryUi {
         bar.setMax(100);
         bar.setProgress((int) Math.min(100, Math.max(0, 100.0 * position / duration)));
         bar.setProgressTintList(ColorStateList.valueOf(ACCENT));
-        bar.setProgressBackgroundTintList(ColorStateList.valueOf(0xff776187));
+        bar.setProgressBackgroundTintList(ColorStateList.valueOf(0xff5a5a5a));
         bar.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         return bar;
     }
