@@ -5,6 +5,7 @@ import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.text.TextUtils;
+import android.util.TypedValue;
 import android.view.DisplayCutout;
 import android.view.Gravity;
 import android.view.MotionEvent;
@@ -15,12 +16,15 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import androidx.media3.common.C;
 import androidx.media3.common.Player;
+import androidx.media3.common.text.Cue;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.ui.AspectRatioFrameLayout;
 import androidx.media3.ui.DefaultTimeBar;
 import androidx.media3.ui.PlayerView;
 import androidx.media3.ui.SubtitleView;
 import androidx.media3.ui.TimeBar;
+import java.util.ArrayList;
+import java.util.List;
 
 @UnstableApi
 final class FullscreenPlaybackView extends FrameLayout {
@@ -57,6 +61,7 @@ final class FullscreenPlaybackView extends FrameLayout {
         @Override public void onEvents(Player source, Player.Events events) {
             restartRefresh();
             if (events.contains(Player.EVENT_IS_PLAYING_CHANGED)) restartControlsTimeout();
+            if (events.contains(Player.EVENT_CUES)) updateCaptionCues();
         }
     };
     private final Runnable hideControls = () -> {
@@ -258,6 +263,7 @@ final class FullscreenPlaybackView extends FrameLayout {
         player = nextPlayer;
         video.setPlayer(nextPlayer);
         if (player != null) player.addListener(playerEvents);
+        updateCaptionCues();
         scrubbing = false;
         soughtToEnd = false;
         restartRefresh();
@@ -482,14 +488,47 @@ final class FullscreenPlaybackView extends FrameLayout {
     private void liftCaptions() {
         SubtitleView captions = video.getSubtitleView();
         if (captions == null || captions.getHeight() == 0) return;
+        int fullHeight = captions.getHeight();
         int inset = 0;
         if (controlsVisible && bottom.getHeight() > 0) {
             captions.getLocationInWindow(captionLocation);
             bottom.getLocationInWindow(bottomLocation);
-            int overlap = captionLocation[1] + captions.getHeight() - bottomLocation[1];
-            inset = Math.min(captions.getHeight() / 2, Math.max(0, overlap + dp(3)));
+            int overlap = captionLocation[1] + fullHeight - bottomLocation[1];
+            inset = Math.min(fullHeight / 2, Math.max(0, overlap + dp(3)));
         }
         if (captions.getPaddingBottom() != inset) captions.setPadding(0, 0, 0, inset);
+        captions.setFixedTextSize(TypedValue.COMPLEX_UNIT_PX, fullHeight * SubtitleView.DEFAULT_TEXT_SIZE_FRACTION);
+        float defaultGap = fullHeight * SubtitleView.DEFAULT_BOTTOM_PADDING_FRACTION;
+        captions.setBottomPaddingFraction(Math.max(0, defaultGap - inset) / (fullHeight - inset));
+        updateCaptionCues();
+    }
+
+    private void updateCaptionCues() {
+        SubtitleView captions = video.getSubtitleView();
+        if (captions == null || player == null || !player.isCommandAvailable(Player.COMMAND_GET_TEXT)) return;
+        List<Cue> original = player.getCurrentCues().cues;
+        int fullHeight = captions.getHeight();
+        int availableHeight = fullHeight - captions.getPaddingBottom();
+        if (original.isEmpty() || availableHeight <= 0 || availableHeight == fullHeight) {
+            captions.setCues(original);
+            return;
+        }
+
+        // Keep text sizes and authored positions in full video coordinates. Media3 fits overlapping
+        // text into the remaining area above the toolbar.
+        List<Cue> fitted = new ArrayList<>(original.size());
+        for (Cue cue : original) {
+            Cue.Builder adjusted = cue.buildUpon();
+            if (cue.textSizeType == Cue.TEXT_SIZE_TYPE_FRACTIONAL
+                    || cue.textSizeType == Cue.TEXT_SIZE_TYPE_FRACTIONAL_IGNORE_PADDING) {
+                adjusted.setTextSize(cue.textSize * fullHeight, Cue.TEXT_SIZE_TYPE_ABSOLUTE);
+            }
+            if (cue.text != null && cue.line != Cue.DIMEN_UNSET && cue.lineType == Cue.LINE_TYPE_FRACTION) {
+                adjusted.setLine(cue.line * fullHeight / availableHeight, Cue.LINE_TYPE_FRACTION);
+            }
+            fitted.add(adjusted.build());
+        }
+        captions.setCues(fitted);
     }
 
     interface Selection {
