@@ -124,29 +124,32 @@ final class JellyfinApi {
                 .addQueryParameter("userId", userId).build(), null));
     }
 
-    Bitmap artwork(Item item, boolean wide, String seriesBackdropId) throws IOException {
+    Bitmap artwork(Item item, boolean wide, String seriesBackdropId, boolean originalWidth) throws IOException {
+        int backdropWidth = originalWidth ? 0 : 640;
+        int posterWidth = originalWidth ? 0 : 420;
         if (!seriesBackdropId.isEmpty()) {
             try {
-                Bitmap backdrop = image(seriesBackdropId, "Backdrop/0", 640);
+                Bitmap backdrop = image(seriesBackdropId, "Backdrop/0", backdropWidth);
                 if (backdrop != null) return backdrop;
             } catch (IOException ignored) {
                 // The episode's own artwork may still be available.
             }
         }
         if (wide && item.hasBackdrop) {
-            Bitmap backdrop = image(item.id, "Backdrop/0", 640);
+            Bitmap backdrop = image(item.id, "Backdrop/0", backdropWidth);
             if (backdrop != null) return backdrop;
         }
         if (item.hasPoster) {
-            Bitmap poster = image(item.id, "Primary", 420);
+            Bitmap poster = image(item.id, "Primary", posterWidth);
             if (poster != null) return poster;
         }
-        return item.seriesId.isEmpty() ? null : image(item.seriesId, "Primary", 420);
+        return item.seriesId.isEmpty() ? null : image(item.seriesId, "Primary", posterWidth);
     }
 
     private Bitmap image(String id, String type, int width) throws IOException {
-        Request request = new Request.Builder().url(url("Items/" + id + "/Images/" + type)
-                .addQueryParameter("maxWidth", Integer.toString(width)).addQueryParameter("quality", "80").build())
+        HttpUrl.Builder imageUrl = url("Items/" + id + "/Images/" + type).addQueryParameter("quality", "80");
+        if (width > 0) imageUrl.addQueryParameter("maxWidth", Integer.toString(width));
+        Request request = new Request.Builder().url(imageUrl.build())
                 .header("Authorization", authorization()).build();
         Call call = http.newCall(request);
         call.timeout().timeout(8, TimeUnit.SECONDS);

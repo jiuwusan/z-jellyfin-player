@@ -149,7 +149,7 @@ final class LibraryUi {
                       int width, Runnable action) {
         int radius = progress ? RADIUS_PANEL : RADIUS_CONTROL;
         LinearLayout tile = column();
-        FrameLayout cover = picture(item, wide, progress ? 0 : radius, wide);
+        FrameLayout cover = picture(item, wide, progress ? 0 : radius, wide, false);
         int imageWidth = width;
         if (progress) {
             GradientDrawable surface = rounded(SURFACE, radius);
@@ -226,10 +226,11 @@ final class LibraryUi {
     }
 
     FrameLayout picture(JellyfinApi.Item item, boolean wide) {
-        return picture(item, wide, RADIUS_SMALL, false);
+        return picture(item, wide, RADIUS_SMALL, false, false);
     }
 
-    private FrameLayout picture(JellyfinApi.Item item, boolean wide, int radius, boolean preferSeriesBackdrop) {
+    private FrameLayout picture(JellyfinApi.Item item, boolean wide, int radius,
+                                boolean preferSeriesBackdrop, boolean originalWidth) {
         FrameLayout cover = new FrameLayout(context);
         cover.setBackground(rounded(PANEL, radius));
         cover.setClipToOutline(true);
@@ -245,14 +246,15 @@ final class LibraryUi {
         String seriesBackdropId = preferSeriesBackdrop ? item.seriesBackdropId : "";
         if (client != null && (item.hasPoster || item.hasBackdrop && wide || !item.seriesId.isEmpty())) {
             String key = item.id + (wide ? ":wide" : ":portrait");
-            String cacheKey = seriesBackdropId.isEmpty() ? key : key + ":series-backdrop:" + seriesBackdropId;
+            String cacheKey = originalWidth ? key + ":original"
+                    : seriesBackdropId.isEmpty() ? key : key + ":series-backdrop:" + seriesBackdropId;
             Bitmap hit = cache.get(cacheKey);
             if (hit != null) {
                 image.setImageBitmap(hit);
             } else {
                 images.execute(() -> {
                     try {
-                        Bitmap bitmap = client.artwork(item, wide, seriesBackdropId);
+                        Bitmap bitmap = client.artwork(item, wide, seriesBackdropId, originalWidth);
                         if (bitmap != null) main.post(() -> {
                             if (connection != client) return;
                             cache.put(cacheKey, bitmap);
@@ -268,7 +270,7 @@ final class LibraryUi {
     }
 
     FrameLayout hero(JellyfinApi.Item item) {
-        FrameLayout cover = picture(item, true, 0, false);
+        FrameLayout cover = picture(item, true, 0, false, true);
         cover.setForeground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
                 new int[] { 0x00101010, 0x40101010, BACKGROUND }));
         return cover;
