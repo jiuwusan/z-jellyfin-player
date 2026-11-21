@@ -708,7 +708,8 @@ public final class MainActivity extends Activity {
     }
 
     private void openItem(JellyfinApi.Item item, Runnable back) {
-        if (item.folder && !item.series) libraryPage(new LibraryLocation(item, false), back);
+        if ("Episode".equals(item.type)) playbackPage(item, null, back);
+        else if (item.folder && !item.series) libraryPage(new LibraryLocation(item, false), back);
         else detailsPage(item, back);
     }
 
@@ -748,27 +749,20 @@ public final class MainActivity extends Activity {
         LinearLayout.LayoutParams body = new LinearLayout.LayoutParams(-1, -2);
         body.topMargin = -dp(44);
         pageView.addView(view, body);
-        boolean episode = !item.seriesName.isEmpty();
         int titleSize = Math.max(30, Math.min(38, Math.round(screenDp * 0.08f)));
-        TextView title = libraryUi.label(episode ? item.seriesName : item.title, titleSize, LibraryUi.TEXT, true);
+        TextView title = libraryUi.label(item.title, titleSize, LibraryUi.TEXT, true);
         title.setIncludeFontPadding(false);
         view.addView(title, new LinearLayout.LayoutParams(-1, -2));
         List<String> metadata = new ArrayList<>();
-        if (episode && item.season > 0) metadata.add("第 " + item.season + " 季");
-        if (episode && item.index > 0) metadata.add("第 " + item.index + " 集");
-        if (!episode && item.year > 0) metadata.add(Integer.toString(item.year));
-        if (!episode && item.series) metadata.add("剧集");
+        if (item.year > 0) metadata.add(Integer.toString(item.year));
+        if (item.series) metadata.add("剧集");
         if ("Movie".equals(item.type)) metadata.add("电影");
         if (item.durationMs > 0) metadata.add(item.durationMs / 60_000 + " 分钟");
         if (!metadata.isEmpty()) text(view, TextUtils.join(" · ", metadata)).setTextSize(13);
         if (item.played) watched(view);
-        if (episode) {
-            String episodeTitle = LibraryUi.episodeTitle(item);
-            view.addView(libraryUi.label(episodeTitle.isEmpty() ? item.title : episodeTitle, 18, LibraryUi.TEXT, true));
-        }
         if (!item.series) {
             Runnable returnToDetails = () -> detailsPage(item, back);
-            Runnable fromStart = () -> playbackPage(item, 0, returnToDetails);
+            Runnable fromStart = () -> playbackPage(item, 0L, returnToDetails);
             if (item.resumeMs > 0) {
                 actionRow(view, "继续观看", () -> playbackPage(item, item.resumeMs, returnToDetails),
                         "从头播放", fromStart, true);
@@ -1008,7 +1002,7 @@ public final class MainActivity extends Activity {
                     list.removeView(loading);
                     if (episodes.isEmpty()) text(list, "暂无剧集。");
                     for (JellyfinApi.Item episode : episodes) {
-                        episodeRow(list, episode, () -> detailsPage(episode,
+                        episodeRow(list, episode, () -> openItem(episode,
                                 () -> detailsPage(series, back, season == null ? null : season.id)));
                     }
                 });
@@ -1057,7 +1051,7 @@ public final class MainActivity extends Activity {
         parent.addView(badge, new LinearLayout.LayoutParams(-2, -2));
     }
 
-    private void playbackPage(JellyfinApi.Item item, long resumeMs, Runnable back) {
+    private void playbackPage(JellyfinApi.Item item, Long startPosition, Runnable back) {
         Runnable close = () -> {
             stopPlayback();
             back.run();
@@ -1075,8 +1069,18 @@ public final class MainActivity extends Activity {
         current.loadNeighbors();
         worker.execute(() -> {
             try {
+                long resumeMs = startPosition == null ? item.resumeMs : startPosition;
+                if (startPosition == null) {
+                    try {
+                        // Search and library cards may still hold the progress from before playback.
+                        resumeMs = current.connection.details(item).resumeMs;
+                    } catch (Exception error) {
+                        Log.w(JellyfinApi.TAG, "Using saved card position because progress refresh failed");
+                    }
+                }
+                long position = resumeMs;
                 JellyfinApi.Stream resolved = current.connection.stream(item, policy);
-                onPage(expected, () -> startPlayback(resolved, current, resumeMs, true, false, null));
+                onPage(expected, () -> startPlayback(resolved, current, position, true, false, null));
             } catch (Exception error) {
                 onPage(expected, () -> current.screen.showMessage(message(error, "无法获取视频")));
             }

@@ -18,7 +18,6 @@
    <button class="jump" data-jump="home">首页 <span aria-hidden="true">↗</span></button>
    <button class="jump" data-jump="library">媒体列表 <span aria-hidden="true">↗</span></button>
    <button class="jump" data-jump="detail">剧集详情 <span aria-hidden="true">↗</span></button>
-   <button class="jump" data-jump="detail" data-item="ep1">单集续播 <span aria-hidden="true">↗</span></button>
    <button class="jump" data-jump="player">全屏播放器 <span aria-hidden="true">↗</span></button>
    <button class="jump" data-jump="settings">连接设置 <span aria-hidden="true">↗</span></button>
    <button class="jump" data-jump="splash">开屏 <span aria-hidden="true">↗</span></button>
@@ -65,7 +64,7 @@ const mediaLibraries=[
  {id:"series",name:"电视剧",items:["detective","neon","palace"]},
  {id:"favorites",name:"自建片库",items:["desert"]}
 ];
-const latest=["lighthouse","palace","desert","neon","forest","detective"];
+const latest=["lighthouse","n2","ep4","palace","desert","forest"];
 const next=["n3","p2","ep2"];
 const records={ep1:1961,forest:1098,lighthouse:314,n2:2500};
 // Jellyfin Web v10.11.11 playback settings use width and bits per second.
@@ -106,6 +105,7 @@ function adjacentEpisode(id,offset){
  return siblings[siblings.indexOf(id)+offset];
 }
 const isWatched=id=>catalog[id].length>0&&records[id]>=catalog[id].length;
+const resumePosition=id=>isWatched(id)?0:records[id]||0;
 const watchedBadge='<span class="watched"><span aria-hidden="true">✓</span>已看完</span>';
 const logo='<img src="logo.png" alt="" width="38" height="38" class="mark">';
 const ratio=id=>Math.min(100,Math.max(0,(records[id]||0)/(catalog[id].length||1)*100));
@@ -134,14 +134,16 @@ function section(title,markup){
 function card(id,mode="poster"){
  const i=catalog[id], resume=mode==="resume", episode=Boolean(i.parent);
  const landscape=resume||mode==="next-up";
+ const homeCard=landscape||mode==="recent";
  const name=episode?parentName(i):i.name;
- const detail=episode?epLabel(i)+(landscape?"":" · "+i.name):i.type+" · "+i.year;
+ const episodeNumber=homeCard&&i.season===1?"第 "+i.episode+" 集":epLabel(i);
+ const detail=episode?episodeNumber+(homeCard?"":" · "+i.name):i.type+" · "+i.year;
  const watchTime=resume?time(records[id])+" / "+time(i.length):"";
  const coverInfo=resume?'<span class="resumeShade" aria-hidden="true"></span>'+
  '<span class="watchTime">'+watchTime+'</span>'+progress(id)+
  '<svg class="quickPlayIcon" viewBox="0 0 34 34" aria-hidden="true"><path d="M12.5,9.5 L26,17 L12.5,24.5 Z"/></svg>':"";
  const action=resume?'data-play="'+id+'" data-position="'+records[id]+'" aria-label="'+
- esc("继续观看 "+name+"，"+detail+"，已观看 "+watchTime)+'"':'data-detail="'+id+'"';
+ esc("继续观看 "+name+"，"+detail+"，已观看 "+watchTime)+'"':'data-open-item="'+id+'"';
  return '<button class="card" type="button" '+action+'>'+
  '<span class="cover '+(landscape?"landscape":"")+'">'+art(i.art)+coverInfo+'</span>'+
  '<span class="cardCopy"><span class="name">'+esc(name)+'</span><span class="sub">'+esc(detail)+'</span></span></button>';
@@ -154,7 +156,7 @@ function home(){
  const queued=next.filter(id=>!resumed.includes(id)&&!isWatched(id));
  return section("继续观看",resumed.length?rail(resumed,"resume"):'<div class="empty">暂无未看完的影片。</div>')+
  (queued.length?section("接下来",rail(queued,"next-up")):"")+
- section("最近添加",rail(latest));
+ section("最近添加",rail(latest,"recent"));
 }
 function library(){
  const selected=current.filter||"all", libraries=[{id:"all",name:"全部",items:tiles},...mediaLibraries];
@@ -163,15 +165,15 @@ function library(){
  '</div><div class="grid">'+matches.map(id=>card(id)).join("")+'</div>';
 }
 function detail(){
- const id=current.id||"ep1",i=catalog[id],watched=isWatched(id),resume=watched?0:(records[id]||0);
- const meta=i.parent?epLabel(i)+" · "+Math.round(i.length/60)+" 分钟":i.year+" · "+i.type+(i.length?" · "+Math.round(i.length/60)+" 分钟":"");
+ const id=current.id,i=catalog[id],watched=isWatched(id),resume=resumePosition(id);
+ const meta=i.year+" · "+i.type+(i.length?" · "+Math.round(i.length/60)+" 分钟":"");
  let buttons="", episodes="";
  if(i.type==="剧集"){
   const ids=Object.keys(catalog).filter(k=>catalog[k].parent===id), seasons=[...new Set(ids.map(k=>catalog[k].season))];
   const sel=current.season||seasons[0];
   const list=ids.filter(k=>catalog[k].season===sel).map(k=>{
    const episode=catalog[k], done=isWatched(k);
-   return '<button class="episode" data-detail="'+k+'"><span class="cover landscape">'+art(episode.art)+'</span>'+
+   return '<button class="episode" data-open-item="'+k+'"><span class="cover landscape">'+art(episode.art)+'</span>'+
     '<span class="episodeInfo"><span class="name">第 '+episode.episode+' 集 · '+episode.name+'</span>'+
     '<span class="sub">'+Math.round(episode.length/60)+' 分钟'+(records[k]&&!done?' · 已看到 '+time(records[k]):"")+'</span></span>'+
     (done?watchedBadge:"")+'</button>';
@@ -184,8 +186,8 @@ function detail(){
   buttons='<div class="actions">'+openButton(watched?"▶　重播":resume?"▶　继续观看":"▶　播放",'data-play="'+id+'" data-position="'+resume+'"',"primary")+
       (resume?openButton("从头播放",'data-play="'+id+'" data-position="0"'):"")+'</div>';
  }
- return '<div class="heroCover">'+art(i.art)+'<span class="shade" aria-hidden="true"></span></div><div class="sheet detail"><h1>'+esc(parentName(i))+'</h1><p class="meta">'+esc(meta)+(watched?watchedBadge:"")+'</p>'+
- (i.parent?'<h2 class="episodeTitle">'+esc(i.name)+'</h2>':"")+buttons+
+ return '<div class="heroCover">'+art(i.art)+'<span class="shade" aria-hidden="true"></span></div><div class="sheet detail"><h1>'+esc(i.name)+'</h1><p class="meta">'+esc(meta)+(watched?watchedBadge:"")+'</p>'+
+ buttons+
  (resume?'<div class="watchprogress">'+progress(id)+'</div><small>已观看 '+time(resume)+' / '+time(i.length)+'</small>':"")+
  '<p class="summary">'+esc(i.desc)+'</p>'+episodes+'</div>';
 }
@@ -253,7 +255,7 @@ function render(){
  if(page==="library")main.querySelector(".filters").scrollLeft=current.filterScroll||0;
  main.scrollTop=0;
  document.querySelectorAll("[data-jump]").forEach(button=>{
-  const selected=button.dataset.jump===page&&(page!=="detail"||(button.dataset.item||"detective")===current.id);
+  const selected=button.dataset.jump===page&&(page!=="detail"||current.id==="detective");
   button.setAttribute("aria-current",selected?"page":"false");
  });
 }
@@ -395,12 +397,16 @@ document.addEventListener("click",e=>{
  const d=button.dataset;
  if("back" in d)back();
  else if(d.jump==="player"){navigate("home",{},true);showPlayer("ep1",records.ep1||0);}
- else if(d.jump)navigate(d.jump,d.jump==="detail"?{id:d.item||"detective"}:{},true);
+ else if(d.jump)navigate(d.jump,d.jump==="detail"?{id:"detective"}:{},true);
  else if(d.tab)navigate(d.tab,{},true);
  else if(d.go)navigate(d.go);
  else if(d.filter){current.filter=d.filter;current.filterScroll=button.closest(".filters").scrollLeft;render();}
  else if(d.season&&button.getAttribute("aria-selected")!=="true")switchSeason(button);
- else if(d.detail)navigate("detail",{id:d.detail});
+ else if(d.openItem){
+  const id=d.openItem;
+  if(catalog[id].parent)showPlayer(id,resumePosition(id));
+  else navigate("detail",{id});
+ }
  else if(d.play)showPlayer(d.play,Number(d.position));
  else if(d.episode)showPlayer(d.episode,isWatched(d.episode)?0:records[d.episode]||0,true);
  else if("togglePlayer" in d){if(!playing&&playTime===catalog[playerKey].length){playTime=0;updateTime();}setPlaying(!playing);}

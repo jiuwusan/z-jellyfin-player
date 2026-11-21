@@ -228,7 +228,6 @@ main.pad[data-screen="library"] { padding-top: 0; }
 .detail { position: relative; margin-top: -64px; }
 .detail h1 { margin: 0 0 7px; font-size: clamp(30px, 8vw, 38px); line-height: 1.16; letter-spacing: -.05em; }
 .meta { color: var(--sub); font-size: 13px; line-height: 1.5; margin: 0 0 14px; }
-.episodeTitle { font-size: 18px; margin-bottom: 13px; }
 .summary { color: #dedede; font-size: 15px; line-height: 1.75; margin: 18px 0 21px; }
 .detail .actions { flex-wrap: wrap; }
 .primary, .secondary {

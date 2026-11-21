@@ -115,7 +115,7 @@ final class LibraryUi {
             JellyfinApi.Item item = items.get(i);
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(width), -2);
             if (i > 0) params.setMarginStart(dp(12));
-            row.addView(card(item, wide, progress, dp(width), () -> action.open(item)), params);
+            row.addView(card(item, wide, progress, true, dp(width), () -> action.open(item)), params);
         }
         return scroll;
     }
@@ -141,11 +141,12 @@ final class LibraryUi {
             JellyfinApi.Item item = items.get(i);
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(width, -2);
             if (i % columns > 0) params.setMarginStart(gap);
-            row.addView(card(item, false, false, width, () -> action.open(item)), params);
+            row.addView(card(item, false, false, false, width, () -> action.open(item)), params);
         }
     }
 
-    private View card(JellyfinApi.Item item, boolean wide, boolean progress, int width, Runnable action) {
+    private View card(JellyfinApi.Item item, boolean wide, boolean progress, boolean homeCard,
+                      int width, Runnable action) {
         int radius = progress ? RADIUS_PANEL : RADIUS_CONTROL;
         LinearLayout tile = column();
         FrameLayout cover = picture(item, wide, progress ? 0 : radius, wide);
@@ -177,9 +178,10 @@ final class LibraryUi {
         title.setEllipsize(TextUtils.TruncateAt.END);
         if (!progress) title.setPadding(0, dp(7), 0, 0);
         copy.addView(title);
-        String episode = (item.season > 0 ? "第 " + item.season + " 季" : "")
-                + (item.index > 0 ? (item.season > 0 ? " · " : "") + "第 " + item.index + " 集" : "");
-        String episodeTitle = wide ? "" : episodeTitle(item);
+        boolean showSeason = item.season > 0 && (!homeCard || item.season != 1);
+        String episode = (showSeason ? "第 " + item.season + " 季" : "")
+                + (item.index > 0 ? (showSeason ? " · " : "") + "第 " + item.index + " 集" : "");
+        String episodeTitle = homeCard ? "" : episodeTitle(item);
         String itemType = item.series ? "剧集" : "Movie".equals(item.type) ? "电影" : "";
         String year = item.year > 0 ? Integer.toString(item.year) : "";
         String subtitle = item.seriesName.isEmpty()

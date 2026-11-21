@@ -7,8 +7,8 @@ android {
         applicationId = "cn.jiuwusan.jellyfin.player"
         minSdk = 23
         targetSdk = 35
-        versionCode = 25
-        versionName = "0.6.11"
+        versionCode = 28
+        versionName = "0.6.14"
     }
 }
 
