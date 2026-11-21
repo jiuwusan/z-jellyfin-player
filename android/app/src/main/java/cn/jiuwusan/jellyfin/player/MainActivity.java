@@ -177,36 +177,39 @@ public final class MainActivity extends Activity {
     }
 
     private void toolbar(LinearLayout root, String title, Runnable back, boolean showTools, int gutter) {
+        boolean library = "媒体库".equals(title);
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPadding(gutter, 0, gutter, 0);
-        row.setBackgroundColor(LibraryUi.PANEL);
-        root.addView(row, new LinearLayout.LayoutParams(-1, dp(61)));
-        if (back != null) toolbarButton(row, "‹", "返回", back);
+        row.setBackgroundColor(library ? LibraryUi.BACKGROUND : LibraryUi.PANEL);
+        root.addView(row, new LinearLayout.LayoutParams(-1, dp(library ? 56 : 61)));
+        if (back != null) toolbarButton(row, "‹", "返回", library, back);
         boolean home = getString(R.string.app_name).equals(title) && back == null;
         if (home) {
             LinearLayout.LayoutParams logoBounds = new LinearLayout.LayoutParams(dp(38), dp(38));
             logoBounds.setMarginStart(-dp(5));
             row.addView(libraryUi.brandMark(), logoBounds);
         }
-        TextView heading = libraryUi.label(title, home ? 22 : 16, LibraryUi.TEXT, true);
+        TextView heading = libraryUi.label(title, home ? 22 : library ? 19 : 16, LibraryUi.TEXT, true);
         heading.setSingleLine();
         heading.setEllipsize(android.text.TextUtils.TruncateAt.END);
         heading.setPadding(back != null || home ? dp(10) : 0, 0, dp(4), 0);
         row.addView(heading, new LinearLayout.LayoutParams(0, -2, 1));
         if (showTools) {
-            if (!"搜索".equals(title)) toolbarButton(row, "⌕", "搜索影片", this::searchPage);
-            toolbarButton(row, "⚙", "连接设置", () -> settingsPage(""));
+            if (!"搜索".equals(title)) toolbarButton(row, "⌕", "搜索影片", library, this::searchPage);
+            toolbarButton(row, "⚙", "连接设置", library, () -> settingsPage(""));
         }
     }
 
-    private void toolbarButton(LinearLayout row, String icon, String description, Runnable action) {
-        TextView button = libraryUi.label(icon, 23, LibraryUi.TEXT, true);
+    private void toolbarButton(LinearLayout row, String icon, String description, boolean flat, Runnable action) {
+        TextView button = libraryUi.label(icon, 23, flat ? LibraryUi.MUTED : LibraryUi.TEXT, true);
         button.setContentDescription(description);
         button.setGravity(Gravity.CENTER);
-        GradientDrawable background = libraryUi.rounded(0x0cffffff, LibraryUi.RADIUS_CONTROL);
-        background.setStroke(dp(1), 0x0fffffff);
-        button.setBackground(background);
+        if (!flat) {
+            GradientDrawable background = libraryUi.rounded(0x0cffffff, LibraryUi.RADIUS_CONTROL);
+            background.setStroke(dp(1), 0x0fffffff);
+            button.setBackground(background);
+        }
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(44), dp(44));
         if (row.getChildCount() != 0) params.setMarginStart(dp(8));
         row.addView(button, params);
@@ -568,7 +571,7 @@ public final class MainActivity extends Activity {
         HorizontalScrollView tabs = new HorizontalScrollView(this);
         tabs.setHorizontalScrollBarEnabled(false);
         LinearLayout row = new LinearLayout(this);
-        row.setPadding(contentGutter(), dp(19), contentGutter(), dp(12));
+        row.setPadding(contentGutter(), 0, contentGutter(), dp(12));
         tabs.addView(row);
         root.addView(tabs, root.indexOfChild(content), new LinearLayout.LayoutParams(-1, -2));
         view.setPadding(contentGutter(), 0, contentGutter(), dp(24));
