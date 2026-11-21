@@ -497,10 +497,10 @@ public final class MainActivity extends Activity {
                     } else {
                         list.removeView(state);
                         boolean resume = shelf == HomeShelf.RESUME;
-                        LibraryUi.ItemAction play = shelf == HomeShelf.LATEST ? null
-                                : item -> playbackPage(item, resume ? item.resumeMs : 0, this::homePage);
-                        list.addView(libraryUi.rail(items, shelf.wide, resume, contentGutter(),
-                                item -> openItem(item, this::homePage), play));
+                        LibraryUi.ItemAction action = resume
+                                ? item -> playbackPage(item, item.resumeMs, this::homePage)
+                                : item -> openItem(item, this::homePage);
+                        list.addView(libraryUi.rail(items, shelf.wide, resume, contentGutter(), action));
                     }
                     Log.i(JellyfinApi.TAG, "Home shelf=" + shelf.name() + " items=" + items.size());
                 });

@@ -138,15 +138,13 @@ function card(id,mode="poster"){
  const detail=episode?epLabel(i)+(resume?"":" · "+i.name):i.type+" · "+i.year;
  const watchTime=resume?time(records[id])+" / "+time(i.length):"";
  const coverInfo=resume?'<span class="resumeShade" aria-hidden="true"></span>'+
- '<span class="watchTime">'+watchTime+'</span>'+progress(id):"";
- const label=resume?' aria-label="'+esc(name+"，"+detail+"，已观看 "+watchTime)+'"':"";
- const details='<button class="card" data-detail="'+id+'"'+label+'>'+
+ '<span class="watchTime">'+watchTime+'</span>'+progress(id)+
+ '<svg class="quickPlayIcon" viewBox="0 0 34 34" aria-hidden="true"><path d="M12.5,9.5 L26,17 L12.5,24.5 Z"/></svg>':"";
+ const action=resume?'data-play="'+id+'" data-position="'+records[id]+'" aria-label="'+
+ esc("继续观看 "+name+"，"+detail+"，已观看 "+watchTime)+'"':'data-detail="'+id+'"';
+ return '<button class="card" type="button" '+action+'>'+
  '<span class="cover '+(landscape?"landscape":"")+'">'+art(i.art)+coverInfo+'</span>'+
  '<span class="cardCopy"><span class="name">'+esc(name)+'</span><span class="sub">'+esc(detail)+'</span></span></button>';
- if(!landscape)return details;
- const playLabel=(resume?"继续观看 ":"播放 ")+name+(episode?" "+epLabel(i):"");
- return '<div class="quickPlayCard">'+details+'<div class="quickPlayOverlay"><button class="quickPlayButton" type="button"'+
- ' data-play="'+id+'" data-position="'+(resume?records[id]:0)+'" aria-label="'+esc(playLabel)+'"><span class="quickPlayIcon" aria-hidden="true">▶</span></button></div></div>';
 }
 function rail(ids,mode){
  return '<div class="rail '+(mode||"poster")+'" tabindex="0">'+ids.map(id=>card(id,mode)).join("")+'</div>';

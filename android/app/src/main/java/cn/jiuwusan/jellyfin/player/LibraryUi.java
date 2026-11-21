@@ -100,7 +100,7 @@ final class LibraryUi {
     interface ItemAction { void open(JellyfinApi.Item item); }
 
     HorizontalScrollView rail(List<JellyfinApi.Item> items, boolean wide, boolean progress, int gutter,
-                              ItemAction details, ItemAction play) {
+                              ItemAction action) {
         HorizontalScrollView scroll = new HorizontalScrollView(context);
         scroll.setHorizontalScrollBarEnabled(false);
         scroll.setClipToPadding(false);
@@ -115,8 +115,7 @@ final class LibraryUi {
             JellyfinApi.Item item = items.get(i);
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(width), -2);
             if (i > 0) params.setMarginStart(dp(12));
-            Runnable quickPlay = play == null ? null : () -> play.open(item);
-            row.addView(card(item, wide, progress, dp(width), () -> details.open(item), quickPlay), params);
+            row.addView(card(item, wide, progress, dp(width), () -> action.open(item)), params);
         }
         return scroll;
     }
@@ -142,11 +141,11 @@ final class LibraryUi {
             JellyfinApi.Item item = items.get(i);
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(width, -2);
             if (i % columns > 0) params.setMarginStart(gap);
-            row.addView(card(item, false, false, width, () -> action.open(item), null), params);
+            row.addView(card(item, false, false, width, () -> action.open(item)), params);
         }
     }
 
-    private View card(JellyfinApi.Item item, boolean wide, boolean progress, int width, Runnable details, Runnable play) {
+    private View card(JellyfinApi.Item item, boolean wide, boolean progress, int width, Runnable action) {
         int radius = progress ? RADIUS_PANEL : RADIUS_CONTROL;
         LinearLayout tile = column();
         FrameLayout cover = picture(item, wide, progress ? 0 : radius);
@@ -207,15 +206,14 @@ final class LibraryUi {
             elapsed.setShadowLayer(dp(2), 0, dp(1), 0xcc000000);
             FrameLayout.LayoutParams timeBounds = new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM | Gravity.START);
             timeBounds.setMarginStart(dp(10));
-            timeBounds.setMarginEnd(dp(play == null ? 10 : 54));
+            timeBounds.setMarginEnd(dp(54));
             timeBounds.bottomMargin = dp(16);
             cover.addView(elapsed, timeBounds);
+            addResumeIcon(cover);
+            tile.setContentDescription("继续观看 " + name + (subtitle.isEmpty() ? "" : "，" + subtitle)
+                    + "，已观看 " + watchTime);
         }
-        if (play != null) {
-            String description = (progress ? "继续观看 " : "播放 ") + name + (episode.isEmpty() ? "" : " " + episode);
-            addQuickPlayButton(cover, progress, description, play);
-        }
-        actionable(tile, details);
+        actionable(tile, action);
         return tile;
     }
 
@@ -272,22 +270,17 @@ final class LibraryUi {
         return cover;
     }
 
-    private void addQuickPlayButton(FrameLayout cover, boolean progress, String description, Runnable action) {
-        TextView play = label("▶", 13, TEXT, false);
-        play.setGravity(Gravity.CENTER);
+    private void addResumeIcon(FrameLayout cover) {
+        ImageView play = new ImageView(context);
+        play.setImageResource(R.drawable.ic_quick_play);
         play.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         GradientDrawable badge = rounded(0x80101010, 17);
-        badge.setStroke(dp(1), 0x80ffffff);
+        badge.setStroke(dp(1), 0x38ffffff);
         play.setBackground(badge);
-        FrameLayout button = new FrameLayout(context);
-        button.setContentDescription(description);
-        button.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
-        button.addView(play, new FrameLayout.LayoutParams(dp(34), dp(34), Gravity.CENTER));
-        actionable(button, action);
-        FrameLayout.LayoutParams bounds = new FrameLayout.LayoutParams(dp(48), dp(48), Gravity.BOTTOM | Gravity.END);
-        bounds.setMarginEnd(dp(3));
-        bounds.bottomMargin = dp(progress ? 8 : 3);
-        cover.addView(button, bounds);
+        FrameLayout.LayoutParams bounds = new FrameLayout.LayoutParams(dp(34), dp(34), Gravity.BOTTOM | Gravity.END);
+        bounds.setMarginEnd(dp(10));
+        bounds.bottomMargin = dp(15);
+        cover.addView(play, bounds);
     }
 
     private void positionBar(FrameLayout frame, long position, long duration) {
