@@ -218,18 +218,41 @@ main.pad[data-screen="library"] { padding-top: 0; }
 }
 .filters .chip:focus-visible { outline-offset: -2px; border-radius: var(--radius-small); }
 
-.heroCover { height: clamp(218px, 66vw, 270px); }
+.heroCover { height: clamp(176px, 30svh, 260px); }
 .heroCover .art { top: 43%; }
 .heroCover .shade {
   position: absolute; inset: 0;
-  background: linear-gradient(to top, var(--bg) 1%, #10101075 38%, transparent 74%);
+  background: linear-gradient(to top, var(--panel) 1%, #10101075 38%, transparent 74%);
 }
 .sheet { padding: 20px var(--gutter) 28px; }
-.detail { position: relative; margin-top: -64px; }
-.detail h1 { margin: 0 0 7px; font-size: clamp(30px, 8vw, 38px); line-height: 1.16; letter-spacing: -.05em; }
+.detail {
+  --detail-poster-width: clamp(90px, 30vw, 128px);
+}
+.detailRibbon { position: relative; background: var(--panel); padding: 0 var(--gutter) 18px; }
+.detailIdentity {
+  display: grid; grid-template-columns: var(--detail-poster-width) minmax(0, 1fr);
+  gap: 14px; align-items: end;
+}
+.detailPoster { margin-top: calc(-.88 * var(--detail-poster-width)); box-shadow: 0 5px 18px #0007; }
+.detailHeading { align-self: center; padding: 10px 0; text-align: center; }
+.detail h1 { margin: 0 0 7px; font-size: clamp(25px, 7.2vw, 34px); line-height: 1.16; letter-spacing: -.05em; overflow-wrap: anywhere; }
 .meta { color: var(--sub); font-size: 13px; line-height: 1.5; margin: 0 0 14px; }
-.summary { color: #dedede; font-size: 15px; line-height: 1.75; margin: 18px 0 21px; }
-.detail .actions { flex-wrap: wrap; }
+.detailHeading .meta { margin-bottom: 0; }
+.summary { color: #dedede; font-size: 15px; line-height: 1.75; margin: 0 0 21px; }
+.detail .actions { flex-wrap: wrap; justify-content: center; gap: 6px; margin-top: 12px; }
+.detailPlay {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  min-height: 44px; padding: 0 14px;
+  border: 1px solid #ffffff3d; border-radius: var(--radius-control);
+  background: #ffffff0a; color: var(--text); font-size: 13px; font-weight: 600;
+}
+.detailPlay svg { width: 22px; height: 22px; fill: currentColor; }
+.detailPlay:hover { background: #ffffff16; border-color: #ffffff70; }
+.detailHeading .detailPlay { color: var(--primary-light); }
+.detail .section:has(.detailPlay) { align-items: center; margin-bottom: 5px; }
+.section .detailPlay { padding: 0 4px 0 10px; border: 0; background: transparent; color: var(--primary-light); }
+.section .detailPlay:hover { background: #ffffff0a; }
+.detailHeading .secondary { min-height: 44px; padding: 0 10px; font-size: 12px; font-weight: 400; }
 .primary, .secondary {
   display: inline-flex; justify-content: center; align-items: center; min-height: 48px;
   padding: 8px 16px; border-radius: var(--radius-control); font-size: 14px; font-weight: 700;

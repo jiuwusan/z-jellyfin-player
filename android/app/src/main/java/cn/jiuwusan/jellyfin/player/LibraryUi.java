@@ -272,8 +272,14 @@ final class LibraryUi {
     FrameLayout hero(JellyfinApi.Item item) {
         FrameLayout cover = picture(item, true, 0, false, true);
         cover.setForeground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[] { 0x00101010, 0x40101010, BACKGROUND }));
+                new int[] { 0x00202020, 0x40101010, PANEL }));
         return cover;
+    }
+
+    FrameLayout detailPoster(JellyfinApi.Item item) {
+        FrameLayout poster = picture(item, false, RADIUS_CONTROL, false, true);
+        poster.setElevation(dp(5));
+        return poster;
     }
 
     private void addResumeIcon(FrameLayout cover) {

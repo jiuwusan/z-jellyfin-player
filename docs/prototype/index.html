@@ -77,8 +77,12 @@ const settingsConfirmation="jellyfin";
 const initialSettings={host:"proxy.example.net",port:"8080",proxyUser:"family",proxyPass:"prototype",server:"https://media.example.net/jellyfin",user:"家庭账号",pass:"prototype",resolution:"1920",bitrate:"4000000"};
 let saved={...initialSettings};
 let pendingSettings=null;
-const initialScreen=new URLSearchParams(location.search).get("screen");
-let current={page:initialScreen==="splash"?"splash":"home"};
+const previewParams=new URLSearchParams(location.search);
+const initialScreen=previewParams.get("screen");
+const previewItem=previewParams.get("item");
+let current=initialScreen==="detail"
+ ?{page:"detail",id:tiles.includes(previewItem)?previewItem:"detective"}
+ :{page:initialScreen==="splash"?"splash":"home"};
 const stack=[];
 let playTime=0, playing=false, timer=null, playerKey="";
 const controlsTimeoutMs=5000;
@@ -128,8 +132,8 @@ function back(){
  if(current.page==="player")leavePlayer();
  current=stack.pop()||{page:"home"};render();main.scrollTop=current.scroll||0;
 }
-function section(title,markup){
- return '<section class="group"><div class="section"><h2>'+title+'</h2></div>'+markup+'</section>';
+function section(title,markup,action=""){
+ return '<section class="group"><div class="section"><h2>'+title+'</h2>'+action+'</div>'+markup+'</section>';
 }
 function card(id,mode="poster"){
  const i=catalog[id], resume=mode==="resume", episode=Boolean(i.parent);
@@ -166,10 +170,18 @@ function library(){
 }
 function detail(){
  const id=current.id,i=catalog[id],watched=isWatched(id),resume=resumePosition(id);
+ const playButton=(label,target,position)=>'<button class="detailPlay" data-play="'+target+'" data-position="'+position+'">'+
+  '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5 L19 12 L8 19 Z"/></svg><span>'+esc(label)+'</span></button>';
  const meta=i.year+" · "+i.type+(i.length?" · "+Math.round(i.length/60)+" 分钟":"");
  let buttons="", episodes="";
  if(i.type==="剧集"){
   const ids=Object.keys(catalog).filter(k=>catalog[k].parent===id), seasons=[...new Set(ids.map(k=>catalog[k].season))];
+  const target=ids.find(k=>resumePosition(k)>0)||ids.find(k=>!isWatched(k))||ids[0];
+  if(target){
+   const position=resumePosition(target);
+   buttons='<div class="actions">'+playButton(isWatched(target)?"重播":position?"继续观看":"播放",target,position)+
+      (position?openButton("从头播放",'data-play="'+target+'" data-position="0"'):"")+'</div>';
+  }
   const sel=current.season||seasons[0];
   const list=ids.filter(k=>catalog[k].season===sel).map(k=>{
    const episode=catalog[k], done=isWatched(k);
@@ -183,13 +195,14 @@ function detail(){
    '</div>':"";
   episodes=section("选集",tabs+(tabs?'<div id="episodes-panel" role="tabpanel" aria-labelledby="season-tab-'+sel+'">'+list+'</div>':list));
  }else{
-  buttons='<div class="actions">'+openButton(watched?"▶　重播":resume?"▶　继续观看":"▶　播放",'data-play="'+id+'" data-position="'+resume+'"',"primary")+
+  buttons='<div class="actions">'+playButton(watched?"重播":resume?"继续观看":"播放",id,resume)+
       (resume?openButton("从头播放",'data-play="'+id+'" data-position="0"'):"")+'</div>';
  }
- return '<div class="heroCover">'+art(i.art)+'<span class="shade" aria-hidden="true"></span></div><div class="sheet detail"><h1>'+esc(i.name)+'</h1><p class="meta">'+esc(meta)+(watched?watchedBadge:"")+'</p>'+
- buttons+
+ return '<div class="detail"><div class="heroCover">'+art(i.art)+'<span class="shade" aria-hidden="true"></span></div>'+
+ '<div class="detailRibbon"><div class="detailIdentity"><div class="cover detailPoster">'+art(i.art)+'</div>'+
+ '<div class="detailHeading"><h1>'+esc(i.name)+'</h1><p class="meta">'+esc(meta)+(watched?watchedBadge:"")+'</p>'+buttons+'</div></div>'+
  (resume?'<div class="watchprogress">'+progress(id)+'</div><small>已观看 '+time(resume)+' / '+time(i.length)+'</small>':"")+
- '<p class="summary">'+esc(i.desc)+'</p>'+episodes+'</div>';
+ '</div><div class="sheet"><p class="summary">'+esc(i.desc)+'</p>'+episodes+'</div></div>';
 }
 function settings(){
  const fields=(name,key,type="text")=>'<label class="field">'+name+'<input name="'+key+'" type="'+type+'" value="'+esc(saved[key])+'" required autocomplete="off"></label>';

@@ -31,6 +31,7 @@ import android.view.inputmethod.InputMethodManager;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -742,50 +743,137 @@ public final class MainActivity extends Activity {
     private void showDetails(LinearLayout pageView, JellyfinApi.Item item, Runnable back, String seasonId) {
         pageView.setPadding(0, 0, 0, dp(24));
         int screenDp = getResources().getConfiguration().screenWidthDp;
-        int coverHeight = Math.max(218, Math.min(270, Math.round(screenDp * 0.66f)));
+        int coverHeight = Math.max(176, Math.min(260,
+                Math.round(getResources().getConfiguration().screenHeightDp * 0.3f)));
+        int posterWidth = Math.max(90, Math.min(128, Math.round(screenDp * 0.3f)));
+        int posterHeight = posterWidth * 3 / 2;
+        int overlap = Math.round(posterWidth * 0.88f);
         pageView.addView(libraryUi.hero(item), new LinearLayout.LayoutParams(-1, dp(coverHeight)));
+        LinearLayout ribbon = column();
+        ribbon.setBackgroundColor(LibraryUi.PANEL);
+        ribbon.setPadding(contentGutter(), 0, contentGutter(), dp(18));
+        pageView.addView(ribbon, new LinearLayout.LayoutParams(-1, -2));
+        LinearLayout identity = new LinearLayout(this);
+        identity.setClipChildren(false);
+        identity.setClipToPadding(false);
+        ribbon.setClipChildren(false);
+        ribbon.setClipToPadding(false);
+        pageView.setClipChildren(false);
+        ribbon.addView(identity);
+        FrameLayout posterSlot = new FrameLayout(this);
+        posterSlot.setClipChildren(false);
+        posterSlot.setClipToPadding(false);
+        LinearLayout.LayoutParams posterSlotBounds = new LinearLayout.LayoutParams(dp(posterWidth), dp(posterHeight - overlap));
+        posterSlotBounds.gravity = Gravity.BOTTOM;
+        identity.addView(posterSlot, posterSlotBounds);
+        FrameLayout.LayoutParams posterBounds = new FrameLayout.LayoutParams(-1, dp(posterHeight), Gravity.BOTTOM);
+        posterSlot.addView(libraryUi.detailPoster(item), posterBounds);
+        LinearLayout heading = column();
+        heading.setGravity(Gravity.CENTER);
+        heading.setPadding(0, dp(10), 0, dp(10));
+        LinearLayout.LayoutParams headingBounds = new LinearLayout.LayoutParams(0, -2, 1);
+        headingBounds.setMarginStart(dp(14));
+        identity.setGravity(Gravity.CENTER_VERTICAL);
+        identity.addView(heading, headingBounds);
         LinearLayout view = column();
-        view.setPadding(contentGutter(), 0, contentGutter(), 0);
+        view.setPadding(contentGutter(), dp(20), contentGutter(), 0);
         LinearLayout.LayoutParams body = new LinearLayout.LayoutParams(-1, -2);
-        body.topMargin = -dp(44);
         pageView.addView(view, body);
-        int titleSize = Math.max(30, Math.min(38, Math.round(screenDp * 0.08f)));
+        int titleSize = Math.max(25, Math.min(34, Math.round(screenDp * 0.072f)));
         TextView title = libraryUi.label(item.title, titleSize, LibraryUi.TEXT, true);
         title.setIncludeFontPadding(false);
-        view.addView(title, new LinearLayout.LayoutParams(-1, -2));
+        title.setGravity(Gravity.CENTER);
+        heading.addView(title, new LinearLayout.LayoutParams(-1, -2));
         List<String> metadata = new ArrayList<>();
         if (item.year > 0) metadata.add(Integer.toString(item.year));
         if (item.series) metadata.add("剧集");
         if ("Movie".equals(item.type)) metadata.add("电影");
         if (item.durationMs > 0) metadata.add(item.durationMs / 60_000 + " 分钟");
-        if (!metadata.isEmpty()) text(view, TextUtils.join(" · ", metadata)).setTextSize(13);
-        if (item.played) watched(view);
+        if (!metadata.isEmpty()) {
+            TextView info = libraryUi.label(TextUtils.join(" · ", metadata), 13, LibraryUi.MUTED, false);
+            info.setGravity(Gravity.CENTER);
+            info.setPadding(0, dp(7), 0, 0);
+            heading.addView(info);
+        }
+        if (item.played) watched(heading);
         if (!item.series) {
             Runnable returnToDetails = () -> detailsPage(item, back);
-            Runnable fromStart = () -> playbackPage(item, 0L, returnToDetails);
+            detailPlaybackActions(heading, item, returnToDetails);
             if (item.resumeMs > 0) {
-                actionRow(view, "继续观看", () -> playbackPage(item, item.resumeMs, returnToDetails),
-                        "从头播放", fromStart, true);
                 if (item.durationMs > 0) {
                     LinearLayout.LayoutParams progress = new LinearLayout.LayoutParams(-1, dp(5));
                     progress.topMargin = dp(12);
-                    view.addView(libraryUi.watchProgress(item.resumeMs, item.durationMs), progress);
+                    ribbon.addView(libraryUi.watchProgress(item.resumeMs, item.durationMs), progress);
                 }
-                text(view, "已观看 " + LibraryUi.time(item.resumeMs)
+                text(ribbon, "已观看 " + LibraryUi.time(item.resumeMs)
                         + (item.durationMs > 0 ? " / " + LibraryUi.time(item.durationMs) : ""));
-            } else {
-                LinearLayout.LayoutParams action = new LinearLayout.LayoutParams(-2, -2);
-                action.topMargin = dp(10);
-                view.addView(makeButton(item.played ? "重播" : "播放", true, fromStart), action);
             }
         }
         if (!item.overview.isEmpty()) {
             TextView overview = text(view, item.overview);
             overview.setTextSize(15);
             overview.setLineSpacing(dp(4), 1);
-            overview.setPadding(0, dp(15), 0, dp(6));
+            overview.setPadding(0, 0, 0, dp(16));
         }
-        if (item.series) showSeasons(view, item, back, seasonId);
+        if (item.series) showSeasons(view, heading, item, back, seasonId);
+    }
+
+    private void detailPlaybackActions(LinearLayout heading, JellyfinApi.Item item, Runnable returnToDetails) {
+            Runnable fromStart = () -> playbackPage(item, 0L, returnToDetails);
+            if (item.resumeMs > 0) {
+                LinearLayout actions = new LinearLayout(this) {
+                    @Override protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+                        int desiredWidth = 0;
+                        for (int i = 0; i < getChildCount(); i++) {
+                            View child = getChildAt(i);
+                            child.measure(View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+                                    View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
+                            desiredWidth += child.getMeasuredWidth();
+                        }
+                        boolean wrap = View.MeasureSpec.getMode(widthMeasureSpec) != View.MeasureSpec.UNSPECIFIED
+                                && desiredWidth + dp(6) > View.MeasureSpec.getSize(widthMeasureSpec);
+                        setOrientation(wrap ? VERTICAL : HORIZONTAL);
+                        for (int i = 0; i < getChildCount(); i++) {
+                            LinearLayout.LayoutParams bounds = (LinearLayout.LayoutParams) getChildAt(i).getLayoutParams();
+                            int gap = !wrap && i > 0 ? dp(6) : 0;
+                            bounds.leftMargin = getLayoutDirection() == View.LAYOUT_DIRECTION_RTL ? 0 : gap;
+                            bounds.rightMargin = getLayoutDirection() == View.LAYOUT_DIRECTION_RTL ? gap : 0;
+                            bounds.topMargin = wrap && i > 0 ? dp(6) : 0;
+                        }
+                        super.onMeasure(widthMeasureSpec, heightMeasureSpec);
+                    }
+                };
+                actions.setGravity(Gravity.CENTER);
+                LinearLayout.LayoutParams actionBounds = new LinearLayout.LayoutParams(-1, -2);
+                actionBounds.topMargin = dp(12);
+                heading.addView(actions, actionBounds);
+                actions.addView(detailPlaybackButton("继续观看", true,
+                        () -> playbackPage(item, item.resumeMs, returnToDetails)));
+                actions.addView(detailPlaybackButton("从头播放", false, fromStart));
+            } else {
+                LinearLayout.LayoutParams actionBounds = new LinearLayout.LayoutParams(-2, -2);
+                actionBounds.gravity = Gravity.CENTER_HORIZONTAL;
+                actionBounds.topMargin = dp(12);
+                heading.addView(detailPlaybackButton(item.played ? "重播" : "播放", true, fromStart), actionBounds);
+            }
+    }
+
+    private TextView detailPlaybackButton(String label, boolean showIcon, Runnable action) {
+        TextView button = libraryUi.label(label, showIcon ? 13 : 12,
+                showIcon ? LibraryUi.ACCENT_LIGHT : LibraryUi.TEXT, showIcon);
+        button.setGravity(Gravity.CENTER);
+        button.setMinHeight(dp(44));
+        button.setPadding(dp(showIcon ? 14 : 10), 0, dp(showIcon ? 14 : 10), 0);
+        android.graphics.drawable.GradientDrawable background = libraryUi.rounded(0x0affffff, LibraryUi.RADIUS_CONTROL);
+        background.setStroke(dp(1), 0x3dffffff);
+        button.setBackground(background);
+        android.graphics.drawable.Drawable icon = getDrawable(R.drawable.ic_quick_play).mutate();
+        icon.setTint(LibraryUi.ACCENT_LIGHT);
+        icon.setBounds(0, 0, dp(22), dp(22));
+        button.setCompoundDrawablesRelative(showIcon ? icon : null, null, null, null);
+        button.setCompoundDrawablePadding(dp(6));
+        libraryUi.actionable(button, action);
+        return button;
     }
 
     private void searchPage() {
@@ -883,11 +971,42 @@ public final class MainActivity extends Activity {
         if (keyboard != null) keyboard.hideSoftInputFromWindow(view.getWindowToken(), 0);
     }
 
-    private void showSeasons(LinearLayout view, JellyfinApi.Item series, Runnable back, String selectedId) {
+    private void showSeasons(LinearLayout view, LinearLayout heading, JellyfinApi.Item series, Runnable back, String selectedId) {
         LinearLayout picker = column();
         view.addView(picker);
-        section(picker, "选集");
-        fillSeasons(picker, series, back, selectedId);
+        LinearLayout header = new LinearLayout(this);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        picker.addView(header);
+        TextView selectionTitle = libraryUi.label("选集", 20, LibraryUi.TEXT, true);
+        selectionTitle.setGravity(Gravity.CENTER_VERTICAL);
+        header.addView(selectionTitle, new LinearLayout.LayoutParams(0, dp(48), 1));
+        LinearLayout playbackActions = column();
+        heading.addView(playbackActions, new LinearLayout.LayoutParams(-1, -2));
+        LinearLayout seasons = column();
+        seasons.setTag(selectedId);
+        picker.addView(seasons);
+        int expected = page;
+        JellyfinApi connection = api;
+        browse.execute(() -> {
+            try {
+                List<JellyfinApi.Item> episodes = connection.episodes(series, null);
+                JellyfinApi.Item target = null;
+                for (JellyfinApi.Item episode : episodes) {
+                    if (episode.resumeMs > 0) { target = episode; break; }
+                    if (target == null && !episode.played) target = episode;
+                }
+                if (target == null && !episodes.isEmpty()) target = episodes.get(0);
+                JellyfinApi.Item chosen = target;
+                onPage(expected, () -> {
+                    if (chosen == null) return;
+                    detailPlaybackActions(playbackActions, chosen,
+                            () -> detailsPage(series, back, (String) seasons.getTag()));
+                });
+            } catch (Exception error) {
+                Log.w(JellyfinApi.TAG, "Unable to load series playback target");
+            }
+        });
+        fillSeasons(seasons, series, back, selectedId);
     }
 
     private void fillSeasons(LinearLayout picker, JellyfinApi.Item series, Runnable back, String selectedId) {
@@ -904,6 +1023,7 @@ public final class MainActivity extends Activity {
                     for (JellyfinApi.Item season : seasons) {
                         if (selected == null || season.id.equals(selectedId)) selected = season;
                     }
+                    picker.setTag(selected == null ? null : selected.id);
                     if (seasons.size() > 1) {
                         HorizontalScrollView scroll = new HorizontalScrollView(this);
                         scroll.setHorizontalScrollBarEnabled(false);
@@ -916,6 +1036,7 @@ public final class MainActivity extends Activity {
                             libraryUi.actionable(tab, () -> {
                                 if (tab.isSelected()) return;
                                 selectChipInRow(row, tab);
+                                picker.setTag(season.id);
                                 fillEpisodes(list, series, season, back);
                             });
                             if (season == selected) scroll.post(() -> scroll.smoothScrollTo(tab.getLeft(), 0));
@@ -929,7 +1050,6 @@ public final class MainActivity extends Activity {
                     loading.setText(message(error, "读取季列表失败"));
                     button(picker, "重试", () -> {
                         picker.removeAllViews();
-                        section(picker, "选集");
                         fillSeasons(picker, series, back, selectedId);
                     });
                 });
