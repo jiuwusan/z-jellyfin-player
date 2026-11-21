@@ -1,0 +1,114 @@
+:root {
+  --bg: #16121d;
+  --panel: #241c2e;
+  --lift: #32263d;
+  --text: #faf3fc;
+  --sub: #d1c2d9;
+  --dim: #b5a4bf;
+  --accent: #e4c5ff;
+  --mint: #b5e7d7;
+  --line: #45364f;
+  --gutter: 20px;
+}
+
+body { background: radial-gradient(ellipse at 68% 15%, #372646, #17131f 52%, #100e15 85%); }
+.desktop {
+  grid-template-columns: minmax(190px, 1fr) 430px;
+  gap: clamp(32px, 7vw, 88px);
+  padding-inline: clamp(28px, 5vw, 74px);
+}
+.notes h1 { font-size: clamp(38px, 5.1vw, 67px); margin: 0 0 34px; }
+.jump { min-height: 50px; align-items: center; }
+.jump[aria-current="page"] span { transform: translateX(3px); }
+.shell { border-color: #614e6b; }
+.top { padding-inline: var(--gutter); background: #1a1522; }
+.toplabel { font-size: 17px; }
+.icon { min-width: 44px; min-height: 44px; }
+.icon[data-back] { font-size: 28px; line-height: 1; }
+main.pad { padding: 16px var(--gutter) 24px; }
+.bottom { background: #211929; padding-inline: 8px; }
+.bottom button { flex: 1; min-width: 0; font-size: 13px; }
+.bottom span { width: 51px; height: 26px; }
+.bottom button[aria-current="page"] span { background: #4e3a5d; }
+
+.group { margin-bottom: 25px; }
+.section { margin-bottom: 10px; }
+h2 { font-size: 20px; }
+.rail {
+  margin-inline: calc(-1 * var(--gutter));
+  padding: 3px var(--gutter) 6px;
+  grid-auto-columns: clamp(100px, 29vw, 118px);
+  gap: 12px;
+  scroll-snap-type: x proximity;
+  scroll-padding-inline: var(--gutter);
+}
+.rail.resume, .rail.next-up { grid-auto-columns: clamp(143px, 42vw, 169px); }
+.card { display: flex; flex-direction: column; align-items: stretch; scroll-snap-align: start; }
+.cover { border: 1px solid #ffffff19; }
+.card > .name, .episode .name { font-size: 14px; }
+.sub { font-size: 12px; }
+.watchTime { font-variant-numeric: tabular-nums; }
+.resumeMark {
+  position: absolute; bottom: 16px; inset-inline-end: 9px;
+  display: grid; place-items: center; width: 28px; height: 28px;
+  border: 1px solid #ffffff80; border-radius: 50%; background: #16121dd9; font-size: 11px;
+}
+.cover .progress { height: 4px; background: #b7a5c980; }
+.filters { gap: 8px; margin: 0 0 17px; flex-wrap: nowrap; overflow-x: auto; padding: 4px; }
+.filters .chip { flex-shrink: 0; white-space: nowrap; }
+.chip { min-height: 44px; padding-inline: 15px; font-size: 13px; }
+.grid { gap: 20px 12px; }
+.grid .cover { border-radius: 12px; }
+
+.heroCover { height: clamp(216px, 66vw, 254px); }
+.heroCover .shade { background: linear-gradient(0deg, var(--bg), #16121d50 48%, transparent 83%); }
+.detail { margin-top: -53px; padding-inline: var(--gutter); }
+.detail h1 { font-size: clamp(30px, 8vw, 36px); }
+.detail .meta { font-size: 13px; }
+.detail .summary { font-size: 15px; line-height: 1.75; }
+.episodeTitle { margin: 0 0 14px; font-size: 18px; }
+.detail .actions { flex-wrap: wrap; }
+.primary, .secondary { min-height: 48px; padding-inline: 17px; font-size: 14px; }
+.secondary { border: 1px solid var(--line); }
+.seasonTabs { margin-bottom: 8px; }
+.seasonTabs .chip { min-height: 44px; }
+.episode { min-height: 68px; }
+.episode .cover { width: 82px; flex-basis: 82px; }
+.watchprogress + small { font-size: 12px; }
+.playerCover { height: auto; }
+.playerbar { flex-wrap: wrap; }
+
+.settingsGroup { padding: 0 0 22px; margin: 0 0 20px; border-bottom: 1px solid var(--line); }
+.settings form h2 { font-size: 18px; margin-bottom: 14px; }
+.settings .field, .confirmDialog .field { font-size: 13px; }
+.settings .field { gap: 2px; margin-block: 0 12px; }
+.settings .field:last-child { margin-bottom: 0; }
+.settings .field input, .settings .field select {
+  min-height: 44px;
+  padding: 8px 4px;
+  border: 0;
+  border-bottom: 1px solid #746283;
+  border-radius: 0;
+  background: transparent;
+  font-size: 15px;
+}
+.settings .field select:focus, .settings .field input:focus { border-bottom-color: var(--accent); }
+.settings .field select option { color: var(--text); background: var(--panel); }
+.settings .qualityFields .field { margin-bottom: 0; }
+.settingsFooter { padding-bottom: 4px; }
+.settingsFooter .helper:empty { display: none; }
+.confirmDialog { padding: 21px; }
+.confirmDialog .field input, .searchField { min-height: 44px; font-size: 15px; }
+.confirmDialog input[aria-invalid="true"] { border-color: #ffbecb; }
+
+@media (max-width: 760px) {
+  body { background: var(--bg); }
+  .desktop { padding-inline: 0; }
+  .top { padding-inline: var(--gutter); }
+}
+
+@media (max-width: 355px) {
+  :root { --gutter: 16px; }
+  .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .qualityFields { grid-template-columns: 1fr; gap: 14px; }
+}

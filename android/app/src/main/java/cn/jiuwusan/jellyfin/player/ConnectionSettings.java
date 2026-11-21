@@ -1,4 +1,4 @@
-package cn.jiuwusan.jellyfin.playbackprobe;
+package cn.jiuwusan.jellyfin.player;
 
 import android.content.Context;
 import android.security.keystore.KeyGenParameterSpec;
@@ -22,9 +22,10 @@ final class ConnectionSettings {
     final String proxyPassword;
     final String user;
     final String password;
+    final int resolution, bitrate;
 
     ConnectionSettings(String server, String host, int port, String proxyUser, String proxyPassword,
-                       String user, String password) {
+                       String user, String password, int resolution, int bitrate) {
         this.server = HttpUrl.parse(server.trim().replaceAll("/+$", "") + "/");
         if (this.server == null || !this.server.username().isEmpty() || !this.server.password().isEmpty()
                 || this.server.query() != null || this.server.fragment() != null) {
@@ -39,12 +40,14 @@ final class ConnectionSettings {
         this.proxyPassword = proxyPassword;
         this.user = user.trim();
         this.password = password;
+        this.resolution = PlaybackPolicy.WIDTHS[PlaybackPolicy.optionIndex(PlaybackPolicy.WIDTHS, resolution, PlaybackPolicy.WIDTH)];
+        this.bitrate = PlaybackPolicy.RATES[PlaybackPolicy.optionIndex(PlaybackPolicy.RATES, bitrate, PlaybackPolicy.TOTAL_BPS)];
     }
 
     void save(Context ctx) throws Exception {
         JSONObject value = new JSONObject().put("server", server.toString()).put("host", host)
                 .put("port", port).put("proxyUser", proxyUser).put("proxyPassword", proxyPassword)
-                .put("user", user).put("password", password);
+                .put("user", user).put("password", password).put("resolution", resolution).put("bitrate", bitrate);
         Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
         cipher.init(Cipher.ENCRYPT_MODE, key(true));
         String encoded = Base64.encodeToString(cipher.getIV(), Base64.NO_WRAP) + "."
@@ -64,7 +67,8 @@ final class ConnectionSettings {
         JSONObject data = new JSONObject(new String(cipher.doFinal(
                 Base64.decode(values[1], Base64.DEFAULT)), StandardCharsets.UTF_8));
         return new ConnectionSettings(data.getString("server"), data.getString("host"), data.getInt("port"),
-                data.getString("proxyUser"), data.getString("proxyPassword"), data.getString("user"), data.getString("password"));
+                data.getString("proxyUser"), data.getString("proxyPassword"), data.getString("user"), data.getString("password"),
+                data.optInt("resolution", PlaybackPolicy.WIDTH), data.optInt("bitrate", PlaybackPolicy.TOTAL_BPS));
     }
 
     private static SecretKey key(boolean create) throws Exception {

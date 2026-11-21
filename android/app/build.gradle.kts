@@ -1,14 +1,14 @@
 plugins { id("com.android.application") version "9.3.1" }
 
 android {
-    namespace = "cn.jiuwusan.jellyfin.playbackprobe"
+    namespace = "cn.jiuwusan.jellyfin.player"
     compileSdk = 36
     defaultConfig {
-        applicationId = "cn.jiuwusan.jellyfin.playbackprobe"
+        applicationId = "cn.jiuwusan.jellyfin.player"
         minSdk = 23
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.2.0"
+        versionCode = 9
+        versionName = "0.4.5"
     }
 }
 

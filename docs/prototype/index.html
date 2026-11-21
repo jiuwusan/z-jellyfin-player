@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Jellyfin 家庭影音 · UI 原型</title>
+<title>Jellyfin 家庭影音 · UI 设计</title>
 <style>
 :root{color-scheme:dark;--bg:#17131d;--panel:#241e2c;--lift:#312938;--text:#f8eef8;--sub:#c7b9cd;--dim:#9f8fa8;--accent:#dfc0ff;--mint:#a9d8cc;--line:#3d3244;--art:url("posters.png")}
 *{box-sizing:border-box}
@@ -13,9 +13,7 @@ button{cursor:pointer;color:inherit;border:0}
 button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--mint);outline-offset:4px}
 .desktop{max-width:1050px;margin:auto;min-height:100svh;display:grid;grid-template-columns:minmax(220px,1fr) 434px;gap:80px;align-items:center;padding:30px 74px}
 .notes{max-width:330px}
-.tag{display:inline-block;color:var(--accent);letter-spacing:.1em;font-size:12px;font-weight:700;border-bottom:1px solid #765c82;padding-bottom:10px}
 .notes h1{font-size:clamp(34px,4.5vw,60px);line-height:1.04;letter-spacing:-.06em;margin:22px 0 18px;font-weight:760}
-.notes p{color:var(--sub);font-size:15px;line-height:1.8;margin:0 0 29px}
 .jumps{display:grid;border-top:1px solid var(--line)}
 .jump{display:flex;justify-content:space-between;text-align:left;padding:15px 0;border-bottom:1px solid var(--line);background:none;font-size:14px;color:var(--sub)}
 .jump[aria-current="page"]{color:var(--accent);font-weight:700}
@@ -41,12 +39,8 @@ main.pad{padding:18px 18px 24px}
 .group:last-child{margin-bottom:3px}
 .section{display:flex;align-items:center;justify-content:space-between;margin:0 0 11px;gap:10px}
 h2{font-size:19px;letter-spacing:-.025em;margin:0;font-weight:740}
-.section button,.quiet{font-size:12px;padding:9px 1px;background:none;color:var(--accent);white-space:nowrap}
-.libraries{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
-.library{cursor:pointer;border-radius:17px;height:92px;position:relative;overflow:hidden;text-align:left;display:flex;align-items:flex-end;padding:13px;background:#3d3444;font-size:17px;font-weight:730}
-.library .shade,.heroCover .shade{position:absolute;inset:0;background:linear-gradient(75deg,#120d19ca,#120d1922),linear-gradient(0deg,#17131dd0,transparent 60%)}
-.library span:last-child{z-index:1}
-.cover,.library,.heroCover{position:relative;overflow:hidden;isolation:isolate;background-color:#3a2b46}
+.heroCover .shade{position:absolute;inset:0}
+.cover,.heroCover{position:relative;overflow:hidden;isolation:isolate;background-color:#3a2b46}
 .cover{display:block;border-radius:14px;aspect-ratio:2/3}
 .cover.landscape{aspect-ratio:16/9}
 .art{position:absolute;top:50%;left:0;width:100%;aspect-ratio:2/3;transform:translateY(-50%);background-image:var(--art);background-size:300% 200%;background-position:var(--x,0%) var(--y,0%);background-color:var(--fallback,#493953);pointer-events:none}
@@ -90,7 +84,6 @@ h2{font-size:19px;letter-spacing:-.025em;margin:0;font-weight:740}
 .episodeInfo{flex:1;min-width:0}
 .watched{display:inline-flex;align-items:center;gap:4px;border-radius:20px;padding:5px 8px;background:#293f3b;color:var(--mint);font-size:11px;font-weight:700;white-space:nowrap}
 .meta .watched{margin-left:8px;vertical-align:middle}
-.cardBox{background:var(--panel);border:1px solid #3b3042;border-radius:17px;padding:15px;margin:0 0 14px}
 .settings form h2{font-size:16px;margin-bottom:14px}
 .field{display:grid;gap:6px;margin:0 0 12px;color:var(--sub);font-size:12px}
 .field:last-child{margin-bottom:0}
@@ -114,18 +107,18 @@ h2{font-size:19px;letter-spacing:-.025em;margin:0;font-weight:740}
 @media(max-width:760px){body{background:var(--bg)}.desktop{display:block;padding:0}.notes{display:none}.shell{border:0;border-radius:0;height:100dvh;min-height:0;width:100%;box-shadow:none}.top{padding-top:env(safe-area-inset-top);height:calc(61px + env(safe-area-inset-top));flex-basis:calc(61px + env(safe-area-inset-top))}}
 @media(prefers-reduced-motion:no-preference){button{transition:background-color .17s,filter .17s}.rail{scroll-behavior:smooth}}
 </style>
+<link rel="stylesheet" href="ui.css">
 </head>
 <body>
 <div class="desktop">
  <aside class="notes" aria-label="原型导航">
-  <div class="tag">ANDROID · 交互原型</div>
   <h1>Jellyfin<br>家庭影音</h1>
-  <p>用海报浏览家里的影片，打开详情，或从上次的位置继续观看。</p>
   <nav class="jumps" aria-label="直接查看页面">
    <button class="jump" data-jump="home">首页 <span aria-hidden="true">↗</span></button>
    <button class="jump" data-jump="library">媒体列表 <span aria-hidden="true">↗</span></button>
-   <button class="jump" data-jump="detail">媒体详情 <span aria-hidden="true">↗</span></button>
-   <button class="jump" data-jump="settings">代理与授权 <span aria-hidden="true">↗</span></button>
+   <button class="jump" data-jump="detail">剧集详情 <span aria-hidden="true">↗</span></button>
+   <button class="jump" data-jump="detail" data-item="ep1">单集续播 <span aria-hidden="true">↗</span></button>
+   <button class="jump" data-jump="settings">连接设置 <span aria-hidden="true">↗</span></button>
   </nav>
  </aside>
  <div class="shell" aria-label="Jellyfin 手机界面">
@@ -164,6 +157,11 @@ const catalog={
  p2:{name:"孤灯与故人",type:"单集",parent:"palace",season:1,episode:2,art:5,length:2550,desc:"归来的访客知道一段未经记载的往事。"}
 };
 const tiles=["detective","forest","neon","lighthouse","desert","palace"];
+const mediaLibraries=[
+ {id:"movies",name:"电影",items:["forest","lighthouse"]},
+ {id:"series",name:"电视剧",items:["detective","neon","palace"]},
+ {id:"favorites",name:"自建片库",items:["desert"]}
+];
 const latest=["lighthouse","palace","desert","neon","forest","detective"];
 const next=["n3","p2","ep2"];
 const records={ep1:1961,forest:1098,lighthouse:314,n2:2500};
@@ -210,34 +208,32 @@ function back(){
  if(current.page==="player")leavePlayer();
  current=stack.pop()||{page:"home"};render();main.scrollTop=current.scroll||0;
 }
-function section(title,markup,action=""){
- return '<section class="group"><div class="section"><h2>'+title+'</h2>'+action+'</div>'+markup+'</section>';
+function section(title,markup){
+ return '<section class="group"><div class="section"><h2>'+title+'</h2></div>'+markup+'</section>';
 }
 function card(id,mode="poster"){
  const i=catalog[id], resume=mode==="resume", episode=Boolean(i.parent);
  const landscape=resume||mode==="next-up";
  const name=episode?parentName(i):i.name;
- let detail=episode?epLabel(i)+" · "+i.name:i.type+" · "+i.year;
- if(resume)detail=(episode?epLabel(i)+" · ":"")+time(records[id])+" / "+time(i.length);
- return '<button class="card" data-detail="'+id+'" aria-label="'+esc(name+(episode?" "+epLabel(i)+" "+i.name:""))+'">'+
- '<span class="cover '+(landscape?"landscape":"")+'">'+art(i.art)+(resume?'<span class="resumeShade"></span>'+progress(id):"")+'</span>'+
- '<span class="name">'+esc(name)+'</span><span class="sub">'+esc(detail)+'</span></button>';
+ const detail=episode?epLabel(i)+(resume?"":" · "+i.name):i.type+" · "+i.year;
+ const watchTime=resume?'<span class="sub watchTime">'+time(records[id])+" / "+time(i.length)+'</span>':"";
+ return '<button class="card" data-detail="'+id+'">'+
+ '<span class="cover '+(landscape?"landscape":"")+'">'+art(i.art)+(resume?'<span class="resumeShade"></span><span class="resumeMark" aria-hidden="true">▶</span>'+progress(id):"")+'</span>'+
+ '<span class="name">'+esc(name)+'</span><span class="sub">'+esc(detail)+'</span>'+watchTime+'</button>';
 }
 function rail(ids,mode){
  return '<div class="rail '+(mode||"poster")+'" tabindex="0">'+ids.map(id=>card(id,mode)).join("")+'</div>';
 }
 function home(){
  const resumed=Object.keys(records).filter(id=>records[id]>0&&records[id]<catalog[id].length);
- const lib=(title,n)=>'<button class="library" data-library="'+title+'">'+art(n)+'<span class="shade" aria-hidden="true"></span><span>'+title+'　›</span></button>';
- return section("我的媒体",'<div class="libraries">'+lib("电影",1)+lib("剧集",0)+'</div>',openButton("全部媒体 ›",'data-library="全部"',"quiet"))+
- section("继续观看",resumed.length?rail(resumed,"resume"):'<div class="empty">暂无未看完的影片。</div>')+
+ return section("继续观看",resumed.length?rail(resumed,"resume"):'<div class="empty">暂无未看完的影片。</div>')+
  section("接下来",rail(next.filter(id=>!resumed.includes(id)&&!isWatched(id)),"next-up"))+
  section("最近添加",rail(latest));
 }
 function library(){
- const filter=current.filter||"全部", filters=["全部","电影","剧集"];
- const matches=tiles.filter(id=>filter==="全部"||catalog[id].type===filter);
- return '<div class="filters" aria-label="媒体类型">'+filters.map(name=>'<button class="chip" data-filter="'+name+'" aria-pressed="'+(name===filter)+'">'+name+'</button>').join("")+
+ const selected=current.filter||"all", libraries=[{id:"all",name:"全部",items:tiles},...mediaLibraries];
+ const matches=libraries.find(library=>library.id===selected).items;
+ return '<div class="filters" aria-label="媒体库">'+libraries.map(({id,name})=>'<button class="chip" data-filter="'+id+'" aria-pressed="'+(id===selected)+'">'+esc(name)+'</button>').join("")+
  '</div><div class="grid">'+matches.map(id=>card(id)).join("")+'</div>';
 }
 function detail(){
@@ -263,7 +259,7 @@ function detail(){
       (resume?openButton("从头播放",'data-play="'+id+'" data-position="0"'):"")+'</div>';
  }
  return '<div class="heroCover">'+art(i.art)+'<span class="shade" aria-hidden="true"></span></div><div class="sheet detail"><h1>'+esc(parentName(i))+'</h1><p class="meta">'+esc(meta)+(watched?watchedBadge:"")+'</p>'+
- (i.parent?'<h2>'+esc(i.name)+'</h2><div style="height:12px"></div>':"")+buttons+
+ (i.parent?'<h2 class="episodeTitle">'+esc(i.name)+'</h2>':"")+buttons+
  (resume?'<div class="watchprogress">'+progress(id)+'</div><small>已观看 '+time(resume)+' / '+time(i.length)+'</small>':"")+
  '<p class="summary">'+esc(i.desc)+'</p>'+episodes+'</div>';
 }
@@ -271,12 +267,12 @@ function settings(){
  const fields=(name,key,type="text")=>'<label class="field">'+name+'<input name="'+key+'" type="'+type+'" value="'+esc(saved[key])+'" required autocomplete="off"></label>';
  const choices=(name,key,values)=>'<label class="field">'+name+'<select name="'+key+'">'+
  values.map(([value,label])=>'<option value="'+value+'" '+(value===saved[key]?"selected":"")+'>'+label+'</option>').join("")+'</select></label>';
- return '<div class="settings"><form id="settings"><section class="cardBox"><h2>家庭 HTTP 代理</h2><div class="columns">'+fields("代理地址","host")+fields("端口","port","number")+
+ return '<div class="settings"><form id="settings"><section class="settingsGroup"><h2>家庭 HTTP 代理</h2><div class="columns">'+fields("代理地址","host")+fields("端口","port","number")+
  '</div>'+fields("代理用户名","proxyUser")+fields("代理密码","proxyPass","password")+'</section>'+
- '<section class="cardBox"><h2>Jellyfin 授权</h2>'+fields("服务器地址","server","url")+fields("Jellyfin 账号","user")+fields("Jellyfin 密码","pass","password")+'</section>'+
- '<section class="cardBox"><h2>播放画质</h2><div class="qualityFields">'+choices("分辨率上限","resolution",resolutions)+
+ '<section class="settingsGroup"><h2>Jellyfin 授权</h2>'+fields("服务器地址","server","url")+fields("Jellyfin 账号","user")+fields("Jellyfin 密码","pass","password")+'</section>'+
+ '<section class="settingsGroup"><h2>播放画质</h2><div class="qualityFields">'+choices("分辨率上限","resolution",resolutions)+
  choices("码率上限（音视频合计）","bitrate",bitrates)+'</div></section>'+
- '<button class="primary full" type="submit">保存并连接</button><div class="helper" id="settings-message" aria-live="polite">原型使用示例配置，不连接实际服务器。</div></form></div>';
+ '<div class="settingsFooter"><button class="primary full" type="submit">保存并连接</button><div class="helper" id="settings-message" aria-live="polite"></div></div></form></div>';
 }
 function searchResults(term){
  const q=term.trim().toLowerCase();
@@ -295,15 +291,20 @@ function player(){
 }
 function render(){
  const {page}=current, onHome=page==="home";
- top.innerHTML='<div class="brand">'+(onHome?'<span class="mark" aria-hidden="true"></span>Jellyfin':'<button class="icon" data-back aria-label="返回">‹</button><span class="toplabel">'+esc(page==="library"?(current.filter==="全部"||!current.filter?"媒体库":current.filter):kind[page])+'</span>')+'</div>'+
+ main.dataset.screen=page;
+ top.innerHTML='<div class="brand">'+(onHome?'<span class="mark" aria-hidden="true"></span>Jellyfin':'<button class="icon" data-back aria-label="返回">‹</button><span class="toplabel">'+esc(kind[page])+'</span>')+'</div>'+
  (page!=="player"?'<div class="tools"><button class="icon search" data-go="search" aria-label="搜索"></button><button class="icon" data-go="settings" aria-label="连接设置">⚙</button></div>':"");
  const tab=page==="settings"?"settings":page==="library"?"library":"home";
  bottom.innerHTML=[["home","⌂","首页"],["library","▤","媒体库"],["settings","⚙","设置"]].map(([p,icon,name])=>'<button data-tab="'+p+'" aria-current="'+(p===tab?"page":"false")+'"><span aria-hidden="true">'+icon+'</span>'+name+'</button>').join("");
  const contents={home,library,detail,settings,search:()=>'<div class="screenSearch"><input class="searchField" id="search-input" type="search" placeholder="搜索片名" aria-label="搜索片名" value="'+esc(current.query||"")+'"></div><div id="results">'+searchResults(current.query||"")+'</div>',player};
  main.className=page==="detail"?"":"pad";
  main.innerHTML=contents[page]();
+ if(page==="library")main.querySelector(".filters").scrollLeft=current.filterScroll||0;
  main.scrollTop=0;
- document.querySelectorAll("[data-jump]").forEach(x=>x.setAttribute("aria-current",x.dataset.jump===page?"page":"false"));
+ document.querySelectorAll("[data-jump]").forEach(button=>{
+  const selected=button.dataset.jump===page&&(page!=="detail"||(button.dataset.item||"detective")===current.id);
+  button.setAttribute("aria-current",selected?"page":"false");
+ });
 }
 function showPlayer(id,position){
  navigate("player",{id});
@@ -338,11 +339,10 @@ document.addEventListener("click",e=>{
  const button=e.target.closest("button");if(!button)return;
  const d=button.dataset;
  if("back" in d)back();
- else if(d.jump)navigate(d.jump,d.jump==="detail"?{id:"ep1"}:{},true);
+ else if(d.jump)navigate(d.jump,d.jump==="detail"?{id:d.item||"detective"}:{},true);
  else if(d.tab)navigate(d.tab,{},true);
  else if(d.go)navigate(d.go);
- else if(d.library)navigate("library",{filter:d.library});
- else if(d.filter){current.filter=d.filter;render();}
+ else if(d.filter){current.filter=d.filter;current.filterScroll=button.closest(".filters").scrollLeft;render();}
  else if(d.season&&button.getAttribute("aria-selected")!=="true")switchSeason(button);
  else if(d.detail)navigate("detail",{id:d.detail});
  else if(d.play)showPlayer(d.play,Number(d.position));

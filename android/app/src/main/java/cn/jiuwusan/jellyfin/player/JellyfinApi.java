@@ -1,4 +1,4 @@
-package cn.jiuwusan.jellyfin.playbackprobe;
+package cn.jiuwusan.jellyfin.player;
 
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
@@ -10,6 +10,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import okhttp3.Call;
 import okhttp3.Credentials;
 import okhttp3.HttpUrl;
 import okhttp3.MediaType;
@@ -22,6 +23,7 @@ import org.json.JSONObject;
 
 final class JellyfinApi {
     static final String TAG = "JellyfinProbe";
+    private static final int LIBRARY_PAGE_SIZE = 36;
     private final ConnectionSettings settings;
     private final OkHttpClient http;
     private final String device;
@@ -76,11 +78,44 @@ final class JellyfinApi {
                 .addQueryParameter("EnableUserData", "true").build(), null).getJSONArray("Items"));
     }
 
-    List<Item> children(Item parent, int offset) throws Exception {
-        return entries(json("读取媒体库", url("Items").addQueryParameter("userId", userId)
-                .addQueryParameter("ParentId", parent.id).addQueryParameter("SortBy", "SortName")
+    List<Item> nextItems() throws Exception {
+        return entries(json("读取接下来", url("Shows/NextUp").addQueryParameter("userId", userId)
+                .addQueryParameter("enableResumable", "false").addQueryParameter("enableUserData", "true")
+                .addQueryParameter("limit", "16").build(), null).getJSONArray("Items"));
+    }
+
+    List<Item> latestItems() throws Exception {
+        return entries(new JSONArray(response("读取最近添加", url("Items/Latest").addQueryParameter("userId", userId)
+                .addQueryParameter("IncludeItemTypes", "Movie,Episode,Video,Series")
+                .addQueryParameter("groupItems", "true").addQueryParameter("limit", "12").build(), null)));
+    }
+
+    LibraryItemsPage libraryItems(Item parent, boolean catalog, int offset) throws Exception {
+        HttpUrl.Builder request = url("Items").addQueryParameter("userId", userId)
+                .addQueryParameter("SortBy", "SortName")
                 .addQueryParameter("StartIndex", Integer.toString(offset))
-                .addQueryParameter("Limit", "36").build(), null).getJSONArray("Items"));
+                .addQueryParameter("Limit", Integer.toString(LIBRARY_PAGE_SIZE));
+        if (parent != null) request.addQueryParameter("ParentId", parent.id);
+        if (catalog) {
+            request.addQueryParameter("Recursive", "true")
+                    .addQueryParameter("IncludeItemTypes", parent == null ? "Movie,Series" : "Movie,Series,Video");
+        }
+        JSONObject result = json("读取媒体库", request.build(), null);
+        List<Item> items = entries(result.getJSONArray("Items"));
+        int total = result.optInt("TotalRecordCount", -1);
+        boolean more = !items.isEmpty()
+                && (total >= 0 ? offset + items.size() < total : items.size() == LIBRARY_PAGE_SIZE);
+        return new LibraryItemsPage(items, more);
+    }
+
+    static final class LibraryItemsPage {
+        final List<Item> items;
+        final boolean more;
+
+        LibraryItemsPage(List<Item> items, boolean more) {
+            this.items = items;
+            this.more = more;
+        }
     }
 
     Item details(Item item) throws Exception {
@@ -88,20 +123,40 @@ final class JellyfinApi {
                 .addQueryParameter("userId", userId).build(), null));
     }
 
-    Bitmap poster(Item item) throws IOException {
-        if (!item.hasPoster) return null;
-        Request request = new Request.Builder().url(url("Items/" + item.id + "/Images/Primary")
-                .addQueryParameter("maxWidth", "420").addQueryParameter("quality", "80").build())
+    Bitmap artwork(Item item, boolean wide) throws IOException {
+        if (wide && item.hasBackdrop) {
+            Bitmap backdrop = image(item.id, "Backdrop/0", 640);
+            if (backdrop != null) return backdrop;
+        }
+        if (item.hasPoster) {
+            Bitmap poster = image(item.id, "Primary", 420);
+            if (poster != null) return poster;
+        }
+        return item.seriesId.isEmpty() ? null : image(item.seriesId, "Primary", 420);
+    }
+
+    private Bitmap image(String id, String type, int width) throws IOException {
+        Request request = new Request.Builder().url(url("Items/" + id + "/Images/" + type)
+                .addQueryParameter("maxWidth", Integer.toString(width)).addQueryParameter("quality", "80").build())
                 .header("Authorization", authorization()).build();
-        try (Response response = http.newCall(request).execute()) {
+        Call call = http.newCall(request);
+        call.timeout().timeout(8, TimeUnit.SECONDS);
+        try (Response response = call.execute()) {
             return response.isSuccessful() && response.body() != null
                     ? BitmapFactory.decodeStream(response.body().byteStream()) : null;
         }
     }
 
-    List<Item> episodes(Item show) throws Exception {
-        JSONArray items = json("读取剧集", url("Shows/" + show.id + "/Episodes")
-                .addQueryParameter("userId", userId).addQueryParameter("Limit", "100").build(), null).getJSONArray("Items");
+    List<Item> seasons(Item show) throws Exception {
+        return entries(json("读取季列表", url("Shows/" + show.id + "/Seasons")
+                .addQueryParameter("userId", userId).build(), null).getJSONArray("Items"));
+    }
+
+    List<Item> episodes(Item show, Item season) throws Exception {
+        HttpUrl.Builder request = url("Shows/" + show.id + "/Episodes")
+                .addQueryParameter("userId", userId).addQueryParameter("EnableUserData", "true");
+        if (season != null) request.addQueryParameter("SeasonId", season.id);
+        JSONArray items = json("读取剧集", request.build(), null).getJSONArray("Items");
         return entries(items);
     }
 
@@ -113,8 +168,8 @@ final class JellyfinApi {
         return results;
     }
 
-    Stream stream(Item item) throws Exception {
-        JSONObject initial = playbackInfo(item, null, false);
+    Stream stream(Item item, PlaybackPolicy policy) throws Exception {
+        JSONObject initial = playbackInfo(item, null, false, policy);
         JSONArray sources = initial.optJSONArray("MediaSources");
         if (sources == null || sources.length() == 0) throw new IOException("没有可用片源");
         JSONObject source = sources.getJSONObject(0);
@@ -122,8 +177,8 @@ final class JellyfinApi {
         JSONObject video = firstVideo(source);
         int width = video.optInt("Width");
         int height = video.optInt("Height");
-        boolean constrained = PlaybackPolicy.needsResize(width, height);
-        JSONObject info = constrained ? playbackInfo(item, sourceId, true) : initial;
+        boolean constrained = policy.requiresTranscode(width, height, source.optLong("Bitrate", video.optLong("BitRate")));
+        JSONObject info = constrained ? playbackInfo(item, sourceId, true, policy) : initial;
         if (constrained) {
             source = findSource(info, sourceId);
         }
@@ -141,16 +196,21 @@ final class JellyfinApi {
                 throw new IOException("服务端没有提供可用的 HLS 地址");
             }
             HttpUrl.Builder request = resolved.newBuilder();
-            if (constrained) {
+            if (policy.maxWidth > 0) {
                 request.removeAllQueryParameters("Width").removeAllQueryParameters("Height")
-                        .setQueryParameter("MaxWidth", Integer.toString(PlaybackPolicy.WIDTH))
-                        .setQueryParameter("MaxHeight", Integer.toString(PlaybackPolicy.HEIGHT))
-                        .setQueryParameter("VideoBitRate", Integer.toString(PlaybackPolicy.VIDEO_BPS))
-                        .setQueryParameter("AudioBitRate", Integer.toString(PlaybackPolicy.AUDIO_BPS))
-                        .setQueryParameter("VideoCodec", "h264").setQueryParameter("AudioCodec", "aac")
+                        .setQueryParameter("MaxWidth", Integer.toString(policy.maxWidth))
+                        .setQueryParameter("MaxHeight", Integer.toString(policy.maxHeight));
+            }
+            if (policy.totalBitrate > 0) {
+                int audio = policy.audioBitrate();
+                request.setQueryParameter("VideoBitRate", Integer.toString(policy.totalBitrate - audio))
+                        .setQueryParameter("AudioBitRate", Integer.toString(audio))
+                        .setQueryParameter("AudioCodec", "aac").setQueryParameter("AllowAudioStreamCopy", "false");
+            }
+            if (constrained || policy.totalBitrate > 0) {
+                request.setQueryParameter("VideoCodec", "h264")
                         .setQueryParameter("MaxFramerate", "60").setQueryParameter("MaxVideoBitDepth", "8")
                         .setQueryParameter("AllowVideoStreamCopy", "false")
-                        .setQueryParameter("AllowAudioStreamCopy", "false")
                         .setQueryParameter("EnableAutoStreamCopy", "false");
             }
             streamUrl = request.build();
@@ -161,7 +221,8 @@ final class JellyfinApi {
                     .addQueryParameter("DeviceId", device).build();
         }
         Log.i(TAG, "Playback source=" + width + "x" + height + " constrained=" + constrained
-                + " HLS=" + hls + (constrained ? " videoBudget=3808000 audioBudget=192000" : ""));
+                + " HLS=" + hls + " maxWidth=" + policy.maxWidth + " maxHeight=" + policy.maxHeight
+                + " totalBudget=" + policy.totalBitrate);
         return new Stream(item.id, sourceId, session, streamUrl, hls, constrained);
     }
 
@@ -192,10 +253,11 @@ final class JellyfinApi {
         throw new IOException("服务端未为选中的片源返回转码信息");
     }
 
-    private JSONObject playbackInfo(Item item, String source, boolean constrained) throws Exception {
+    private JSONObject playbackInfo(Item item, String source, boolean constrained, PlaybackPolicy policy) throws Exception {
         JSONObject body = new JSONObject().put("UserId", userId).put("DeviceProfile", profile());
+        if (policy.totalBitrate > 0) body.put("MaxStreamingBitrate", policy.totalBitrate);
         if (constrained) {
-            body.put("MediaSourceId", source).put("MaxStreamingBitrate", PlaybackPolicy.TOTAL_BPS)
+            body.put("MediaSourceId", source)
                     .put("EnableDirectPlay", false).put("EnableDirectStream", false)
                     .put("EnableTranscoding", true).put("AllowVideoStreamCopy", false).put("AllowAudioStreamCopy", false);
         }
@@ -217,7 +279,7 @@ final class JellyfinApi {
 
     String authorization() {
         return "MediaBrowser Client=\"Jellyfin Playback Probe\", Device=\"Android\", DeviceId=\"" + device
-                + "\", Version=\"0.2.0\"" + (token == null ? "" : ", Token=\"" + token + "\"");
+                + "\", Version=\"0.3.0\"" + (token == null ? "" : ", Token=\"" + token + "\"");
     }
 
     private HttpUrl.Builder url(String path) { return settings.server.newBuilder().addPathSegments(path); }
@@ -228,39 +290,50 @@ final class JellyfinApi {
     }
 
     private JSONObject json(String operation, HttpUrl url, JSONObject body) throws Exception {
+        String text = response(operation, url, body);
+        return text.isEmpty() ? new JSONObject() : new JSONObject(text);
+    }
+
+    private String response(String operation, HttpUrl url, JSONObject body) throws IOException {
         Request.Builder request = new Request.Builder().url(url).header("Authorization", authorization())
                 .header("Accept", "application/json");
         if (body != null) request.post(RequestBody.create(body.toString(), MediaType.get("application/json")));
         try (Response response = http.newCall(request.build()).execute()) {
+            if (response.code() == 407) throw new IOException("HTTP 代理认证失败，请检查代理账号和密码。");
             if (!response.isSuccessful()) throw new IOException(operation + "失败，HTTP " + response.code());
-            String text = response.body() == null ? "" : response.body().string();
-            return text.isEmpty() ? new JSONObject() : new JSONObject(text);
+            return response.body() == null ? "" : response.body().string();
         }
     }
 
     static final class Item {
-        final String id, title, seriesName, overview, type;
-        final boolean series, folder, hasPoster;
+        final String id, title, seriesName, seriesId, overview, type, collectionType;
+        final boolean series, folder, hasPoster, hasBackdrop, played;
         final long durationMs, resumeMs;
-        final int year;
+        final int year, index, season;
 
         Item(JSONObject entry) throws Exception {
             id = entry.getString("Id");
             type = entry.optString("Type");
             String name = entry.getString("Name");
-            title = "Episode".equals(type) && entry.has("IndexNumber")
-                    ? "第 " + entry.optInt("IndexNumber") + " 集 · " + name : name;
+            index = entry.optInt("IndexNumber");
+            season = entry.optInt("ParentIndexNumber");
+            title = "Episode".equals(type) && index > 0 ? "第 " + index + " 集 · " + name : name;
             series = "Series".equals(type);
             folder = entry.optBoolean("IsFolder") || "CollectionFolder".equals(type) || "UserView".equals(type);
             seriesName = entry.optString("SeriesName", "");
+            seriesId = entry.optString("SeriesId", "");
+            collectionType = entry.optString("CollectionType", "");
             overview = entry.optString("Overview", "");
             year = entry.optInt("ProductionYear");
             durationMs = Math.max(0, entry.optLong("RunTimeTicks")) / 10_000;
             JSONObject data = entry.optJSONObject("UserData");
-            long position = data == null || data.optBoolean("Played") ? 0 : data.optLong("PlaybackPositionTicks");
+            played = data != null && data.optBoolean("Played");
+            long position = data == null || played ? 0 : data.optLong("PlaybackPositionTicks");
             resumeMs = Math.max(0, position) / 10_000;
             JSONObject tags = entry.optJSONObject("ImageTags");
             hasPoster = tags != null && tags.has("Primary");
+            JSONArray backdrops = entry.optJSONArray("BackdropImageTags");
+            hasBackdrop = backdrops != null && backdrops.length() > 0;
         }
     }
 
