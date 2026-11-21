@@ -37,11 +37,14 @@ import android.widget.ScrollView;
 import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
+import androidx.media3.common.C;
 import androidx.media3.common.Format;
-import androidx.media3.common.MediaItem;
 import androidx.media3.common.MimeTypes;
 import androidx.media3.common.PlaybackException;
 import androidx.media3.common.Player;
+import androidx.media3.common.TrackSelectionParameters;
+import androidx.media3.common.Tracks;
+import androidx.media3.common.text.CueGroup;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.datasource.okhttp.OkHttpDataSource;
 import androidx.media3.exoplayer.DecoderReuseEvaluation;
@@ -71,6 +74,7 @@ public final class MainActivity extends Activity {
     private JellyfinApi api;
     private JellyfinApi.Stream stream;
     private ExoPlayer player;
+    private PlaybackPage playback;
     private boolean fullscreenPlayback;
     private int previousOrientation;
     private int previousSystemUi;
@@ -1059,27 +1063,275 @@ public final class MainActivity extends Activity {
         };
         int expected = ++page;
         backAction = close;
-        FullscreenPlaybackView screen = new FullscreenPlaybackView(this, libraryUi, displayTitle(item), close);
-        setContentView(screen);
-        enterFullscreenPlayback();
-        screen.requestApplyInsets();
-        JellyfinApi connection = api;
         android.util.DisplayMetrics metrics = getResources().getDisplayMetrics();
         PlaybackPolicy policy = PlaybackPolicy.fromSettings(settings.resolution, settings.bitrate,
                 metrics.widthPixels, metrics.heightPixels);
+        PlaybackPage current = new PlaybackPage(item, policy, close);
+        playback = current;
+        setContentView(current.screen);
+        enterFullscreenPlayback();
+        current.screen.requestApplyInsets();
+        current.loadNeighbors();
         worker.execute(() -> {
             try {
-                JellyfinApi.Stream resolved = connection.stream(item, policy);
-                onPage(expected, () -> startPlayback(resolved, screen, resumeMs));
+                JellyfinApi.Stream resolved = current.connection.stream(item, policy);
+                onPage(expected, () -> startPlayback(resolved, current, resumeMs, true, false, null));
             } catch (Exception error) {
-                onPage(expected, () -> screen.showMessage(message(error, "无法获取视频")));
+                onPage(expected, () -> current.screen.showMessage(message(error, "无法获取视频")));
             }
         });
     }
 
-    private void startPlayback(JellyfinApi.Stream resolved, FullscreenPlaybackView screen, long resumeMs) {
+    private final class PlaybackPage {
+        final JellyfinApi connection = api;
+        final PlaybackPolicy policy;
+        final FullscreenPlaybackView screen;
+        JellyfinApi.Item item, previous, next;
+        PlaybackChange change;
+        int subtitle = PlaybackTracks.AUTO;
+        PlaybackTracks.LocalTrack localSubtitle;
+        boolean foreground = true;
+        boolean loggedSubtitle;
+        boolean autoAdvancePending;
+
+        PlaybackPage(JellyfinApi.Item item, PlaybackPolicy policy, Runnable close) {
+            this.item = item;
+            this.policy = policy;
+            String resolution = PlaybackPolicy.RESOLUTION_LABELS[PlaybackPolicy.optionIndex(
+                    PlaybackPolicy.WIDTHS, settings.resolution, PlaybackPolicy.WIDTH)];
+            String bitrate = PlaybackPolicy.RATE_LABELS[PlaybackPolicy.optionIndex(
+                    PlaybackPolicy.RATES, settings.bitrate, PlaybackPolicy.TOTAL_BPS)];
+            screen = new FullscreenPlaybackView(MainActivity.this, libraryUi, resolution + " · " + bitrate, close,
+                    () -> changeEpisode(previous), () -> changeEpisode(next), this::chooseSubtitle, this::chooseAudio);
+            updateTitle();
+            updateActions();
+        }
+
+        void updateTitle() {
+            if (episodic() && !item.seriesName.isEmpty()) {
+                String season = item.season > 0 ? "第 " + item.season + " 季 · " : "";
+                String episode = item.index > 0 ? "第 " + item.index + " 集 · " : "";
+                screen.setTitle(item.seriesName, season + episode + LibraryUi.episodeTitle(item));
+            } else {
+                String kind = "Movie".equals(item.type) ? "电影" : "视频";
+                screen.setTitle(item.title, item.year > 0 ? item.year + " · " + kind : kind);
+            }
+        }
+
+        boolean episodic() {
+            return "Episode".equals(item.type) && !item.seriesId.isEmpty();
+        }
+
+        void loadNeighbors() {
+            previous = null;
+            next = null;
+            updateActions();
+            if (!episodic()) return;
+            JellyfinApi.Item episode = item;
+            browse.execute(() -> {
+                try {
+                    List<JellyfinApi.Item> items = connection.adjacentEpisodes(episode);
+                    ui.post(() -> {
+                        if (playback != this || item != episode) return;
+                        for (int i = 0; i < items.size(); i++) {
+                            if (!episode.id.equals(items.get(i).id)) continue;
+                            if (i > 0) previous = items.get(i - 1);
+                            if (i + 1 < items.size()) next = items.get(i + 1);
+                            break;
+                        }
+                        updateActions();
+                        advanceAfterEnd();
+                    });
+                } catch (Exception error) {
+                    Log.w(JellyfinApi.TAG, "Unable to load adjacent episodes");
+                }
+            });
+        }
+
+        boolean ready() {
+            return playback == this && change == null && player != null && stream != null && playbackStarted;
+        }
+
+        void updateActions() {
+            boolean enabled = ready();
+            boolean audio = enabled && (stream.hls ? !stream.audio.isEmpty()
+                    : !PlaybackTracks.supported(player.getCurrentTracks(), C.TRACK_TYPE_AUDIO).isEmpty());
+            screen.updateActions(episodic(), enabled && previous != null, enabled && next != null, enabled, audio);
+        }
+
+        void chooseSubtitle() {
+            if (!ready()) return;
+            JellyfinApi.Stream current = stream;
+            List<String> labels = new ArrayList<>();
+            labels.add("自动");
+            labels.add("关闭");
+            int selected = subtitle == PlaybackTracks.OFF ? 1 : 0;
+            for (JellyfinApi.MediaTrack option : current.subtitles) {
+                if (localSubtitle == null && subtitle == option.index) selected = labels.size();
+                labels.add(option.label);
+            }
+            List<PlaybackTracks.LocalTrack> embedded = new ArrayList<>();
+            if (current.subtitles.isEmpty()) {
+                embedded = PlaybackTracks.supported(player.getCurrentTracks(), C.TRACK_TYPE_TEXT);
+                for (PlaybackTracks.LocalTrack option : embedded) {
+                    if (localSubtitle != null && localSubtitle.override().equals(option.override())) selected = labels.size();
+                    labels.add(option.label);
+                }
+            }
+            List<PlaybackTracks.LocalTrack> localOptions = embedded;
+            screen.showChoices("字幕", labels.toArray(new String[0]), selected, which -> {
+                if (!ready() || stream != current) return;
+                localSubtitle = null;
+                if (which == 0) subtitle = PlaybackTracks.AUTO;
+                else if (which == 1) subtitle = PlaybackTracks.OFF;
+                else if (which - 2 < current.subtitles.size()) subtitle = current.subtitles.get(which - 2).index;
+                else {
+                    subtitle = PlaybackTracks.AUTO;
+                    localSubtitle = localOptions.get(which - 2 - current.subtitles.size());
+                }
+                loggedSubtitle = false;
+                PlaybackTracks.setSubtitle(player, player.getCurrentTracks(), current, subtitle, localSubtitle);
+                Log.i(JellyfinApi.TAG, "Subtitle selection index=" + subtitle + " local=" + (localSubtitle != null));
+            });
+        }
+
+        void chooseAudio() {
+            if (!ready()) return;
+            JellyfinApi.Stream current = stream;
+            if (current.hls) {
+                String[] labels = new String[current.audio.size()];
+                int selected = -1;
+                for (int i = 0; i < labels.length; i++) {
+                    JellyfinApi.MediaTrack option = current.audio.get(i);
+                    labels[i] = option.label;
+                    if (option.index == current.audioIndex) selected = i;
+                }
+                screen.showChoices("音轨", labels, selected, which -> {
+                    if (!ready() || stream != current) return;
+                    int index = current.audio.get(which).index;
+                    if (index != current.audioIndex) switchTo(item, index);
+                });
+                return;
+            }
+            List<PlaybackTracks.LocalTrack> options = PlaybackTracks.supported(player.getCurrentTracks(), C.TRACK_TYPE_AUDIO);
+            String[] labels = new String[options.size()];
+            int selected = -1;
+            for (int i = 0; i < labels.length; i++) {
+                labels[i] = options.get(i).label;
+                if (options.get(i).selected()) selected = i;
+            }
+            screen.showChoices("音轨", labels, selected, which -> {
+                if (ready() && stream == current) PlaybackTracks.select(player, options.get(which));
+            });
+        }
+
+        void changeEpisode(JellyfinApi.Item target) {
+            if (target != null && ready()) switchTo(target, null);
+        }
+
+        void advanceAfterEnd() {
+            if (!autoAdvancePending || next == null || !foreground || !ready()
+                    || player.getPlaybackState() != Player.STATE_ENDED || !player.getPlayWhenReady()) return;
+            Log.i(JellyfinApi.TAG, "Autoplay next season=" + next.season + " episode=" + next.index);
+            changeEpisode(next);
+        }
+
+        void switchTo(JellyfinApi.Item target, Integer audioIndex) {
+            boolean sameEpisode = target == item;
+            PlaybackChange pending = new PlaybackChange(stream, target, player.getCurrentPosition(),
+                    player.getPlayWhenReady(), player.getPlaybackState() == Player.STATE_ENDED,
+                    subtitle, localSubtitle, player.getTrackSelectionParameters());
+            autoAdvancePending = false;
+            change = pending;
+            player.pause();
+            updateActions();
+            screen.showMessage(sameEpisode ? "正在切换音轨…" : "正在切换剧集…");
+            browse.execute(() -> {
+                try {
+                    JellyfinApi.Stream resolved = sameEpisode
+                            ? connection.stream(target, policy, pending.previous.sourceId, audioIndex)
+                            : connection.stream(target, policy);
+                    ui.post(() -> {
+                        if (playback != this || change != pending) return;
+                        releasePlayer(false);
+                        if (!sameEpisode) {
+                            subtitle = pending.subtitle == PlaybackTracks.OFF ? PlaybackTracks.OFF : PlaybackTracks.AUTO;
+                            localSubtitle = null;
+                        }
+                        long position = sameEpisode ? pending.position : target.resumeMs;
+                        startPlayback(resolved, this, position, pending.playWhenReady, false, null);
+                    });
+                } catch (Exception error) {
+                    ui.post(() -> {
+                        if (playback == this && change == pending) recoverSwitch();
+                    });
+                }
+            });
+        }
+
+        void recoverSwitch() {
+            PlaybackChange pending = change;
+            change = null;
+            subtitle = pending.subtitle;
+            localSubtitle = pending.localSubtitle;
+            boolean resume = pending.playWhenReady && !pending.endedBeforeSwitch;
+            if (stream == pending.previous) {
+                player.setPlayWhenReady(resume && foreground);
+                screen.showVideo();
+                updateActions();
+            } else {
+                releasePlayer(false);
+                startPlayback(pending.previous, this, pending.position, resume, true, pending.parameters);
+            }
+            Toast.makeText(MainActivity.this, "切换失败，已恢复原播放", Toast.LENGTH_SHORT).show();
+        }
+
+        void finishSwitch(long position) {
+            if (change == null) return;
+            PlaybackChange pending = change;
+            change = null;
+            enqueueReport(connection, pending.previous, "Stopped", pending.position, !pending.playWhenReady);
+            if (pending.target != item) {
+                item = pending.target;
+                updateTitle();
+                loadNeighbors();
+            }
+            Log.i(JellyfinApi.TAG, "Playback switch complete audioIndex=" + stream.audioIndex
+                    + " positionMs=" + position);
+        }
+    }
+
+    private static final class PlaybackChange {
+        final JellyfinApi.Stream previous;
+        final JellyfinApi.Item target;
+        final long position;
+        final boolean endedBeforeSwitch;
+        final int subtitle;
+        final PlaybackTracks.LocalTrack localSubtitle;
+        final TrackSelectionParameters parameters;
+        boolean playWhenReady;
+
+        PlaybackChange(JellyfinApi.Stream previous, JellyfinApi.Item target, long position, boolean playWhenReady,
+                       boolean endedBeforeSwitch, int subtitle, PlaybackTracks.LocalTrack localSubtitle,
+                       TrackSelectionParameters parameters) {
+            this.previous = previous;
+            this.target = target;
+            this.position = position;
+            this.playWhenReady = playWhenReady;
+            this.endedBeforeSwitch = endedBeforeSwitch;
+            this.subtitle = subtitle;
+            this.localSubtitle = localSubtitle;
+            this.parameters = parameters;
+        }
+    }
+
+    private void startPlayback(JellyfinApi.Stream resolved, PlaybackPage current, long resumeMs, boolean play,
+                               boolean alreadyReported, TrackSelectionParameters restored) {
+        FullscreenPlaybackView screen = current.screen;
         stream = resolved;
-        playbackStarted = false;
+        playbackStarted = alreadyReported;
+        current.loggedSubtitle = false;
+        current.autoAdvancePending = false;
         DefaultRenderersFactory renderers = new DefaultRenderersFactory(this)
                 .setEnableDecoderFallback(false)
                 .setMediaCodecSelector((mime, secure, tunneling) -> {
@@ -1089,12 +1341,16 @@ public final class MainActivity extends Activity {
                     for (MediaCodecInfo codec : codecs) if (codec.hardwareAccelerated) hardware.add(codec);
                     return hardware;
                 });
-        OkHttpDataSource.Factory data = new OkHttpDataSource.Factory(api.client())
-                .setDefaultRequestProperties(Collections.singletonMap("Authorization", api.authorization()));
-        player = new ExoPlayer.Builder(this, renderers)
+        OkHttpDataSource.Factory data = new OkHttpDataSource.Factory(current.connection.client())
+                .setDefaultRequestProperties(Collections.singletonMap("Authorization", current.connection.authorization()));
+        ExoPlayer active = new ExoPlayer.Builder(this, renderers)
                 .setMediaSourceFactory(new DefaultMediaSourceFactory(data)).build();
-        screen.video.setPlayer(player);
-        player.addAnalyticsListener(new AnalyticsListener() {
+        player = active;
+        screen.setPlayer(active);
+        if (restored != null) active.setTrackSelectionParameters(restored);
+        active.addAnalyticsListener(new AnalyticsListener() {
+            private boolean firstFrame;
+
             @Override public void onVideoDecoderInitialized(EventTime time, String name, long at, long duration) {
                 Log.i(JellyfinApi.TAG, "Hardware decoder=" + name);
             }
@@ -1103,30 +1359,73 @@ public final class MainActivity extends Activity {
                         + " fps=" + input.frameRate + " averageBitrate=" + input.averageBitrate);
             }
             @Override public void onRenderedFirstFrame(EventTime time, Object output, long renderTimeMs) {
-                if (stream != resolved || playbackStarted) return;
+                if (player != active || firstFrame) return;
+                firstFrame = true;
                 playbackStarted = true;
+                current.finishSwitch(active.getCurrentPosition());
                 screen.showVideo();
+                current.updateActions();
                 Log.i(JellyfinApi.TAG, "First frame rendered");
-                report("");
+                report(alreadyReported ? "Progress" : "");
                 ui.postDelayed(progress, 10_000);
+                current.advanceAfterEnd();
             }
         });
-        player.addListener(new Player.Listener() {
-            @Override public void onPlaybackStateChanged(int state) {
-                if (state == Player.STATE_ENDED && stream == resolved) report("Progress");
+        active.addListener(new Player.Listener() {
+            private boolean userSought;
+
+            @Override public void onPositionDiscontinuity(Player.PositionInfo oldPosition,
+                                                          Player.PositionInfo newPosition, int reason) {
+                if (player != active || reason != Player.DISCONTINUITY_REASON_SEEK) return;
+                userSought = true;
+                current.autoAdvancePending = false;
+            }
+
+            @Override public void onEvents(Player source, Player.Events events) {
+                if (player != active || !events.contains(Player.EVENT_PLAYBACK_STATE_CHANGED)
+                        || source.getPlaybackState() != Player.STATE_ENDED) return;
+                if (alreadyReported && current.change == null) {
+                    screen.showVideo();
+                    current.updateActions();
+                }
+                report("Progress");
+                long duration = source.getDuration();
+                boolean startedAtEnd = !userSought && duration > 0 && resumeMs >= duration;
+                current.autoAdvancePending = current.foreground && current.change == null
+                        && source.getPlayWhenReady() && !screen.soughtToEnd() && !startedAtEnd;
+                Log.i(JellyfinApi.TAG, "Playback ended autoAdvanceEligible=" + current.autoAdvancePending);
+                current.advanceAfterEnd();
+            }
+            @Override public void onTracksChanged(Tracks tracks) {
+                if (player != active) return;
+                PlaybackTracks.setSubtitle(active, tracks, resolved, current.subtitle, current.localSubtitle);
+                current.updateActions();
+            }
+            @Override public void onCues(CueGroup group) {
+                if (player == active && !current.loggedSubtitle && !group.cues.isEmpty()) {
+                    current.loggedSubtitle = true;
+                    Log.i(JellyfinApi.TAG, "Subtitle rendered index=" + current.subtitle);
+                }
             }
             @Override public void onPlayerError(PlaybackException error) {
                 String code = error.getErrorCodeName();
                 Log.w(JellyfinApi.TAG, "Playback error " + code);
-                if (stream == resolved) screen.showMessage("播放失败 · " + code);
+                if (player != active) return;
+                if (current.change != null) {
+                    ui.post(() -> {
+                        if (player == active && current.change != null) current.recoverSwitch();
+                    });
+                } else {
+                    screen.showMessage("播放失败 · " + code);
+                }
             }
         });
-        MediaItem.Builder item = new MediaItem.Builder().setUri(resolved.url.toString());
-        if (resolved.hls) item.setMimeType(MimeTypes.APPLICATION_M3U8);
-        player.setMediaItem(item.build(), resumeMs);
+        active.setMediaItem(PlaybackTracks.mediaItem(resolved), resumeMs);
+        PlaybackTracks.setSubtitle(active, Tracks.EMPTY, resolved, current.subtitle, current.localSubtitle);
         if (resumeMs > 0) Log.i(JellyfinApi.TAG, "Requested resume position ms=" + resumeMs);
-        player.prepare();
-        player.play();
+        Log.i(JellyfinApi.TAG, "Starting playback audioIndex=" + resolved.audioIndex);
+        active.setPlayWhenReady(play && current.foreground);
+        active.prepare();
     }
 
     private void enterFullscreenPlayback() {
@@ -1195,6 +1494,11 @@ public final class MainActivity extends Activity {
         if (active == null || player == null || connection == null || !playbackStarted) return;
         long position = player.getCurrentPosition();
         boolean paused = !player.getPlayWhenReady();
+        enqueueReport(connection, active, event, position, paused);
+    }
+
+    private void enqueueReport(JellyfinApi connection, JellyfinApi.Stream active, String event, long position,
+                               boolean paused) {
         worker.execute(() -> {
             try {
                 connection.report(active, event, position, paused);
@@ -1205,28 +1509,51 @@ public final class MainActivity extends Activity {
     }
 
     private void stopPlayback() {
-        ui.removeCallbacks(progress);
-        if (player != null) {
-            report("Stopped");
-            playbackStarted = false;
-            stream = null;
-            player.release();
-            player = null;
+        PlaybackPage current = playback;
+        if (current != null && current.change != null && stream != current.change.previous) {
+            PlaybackChange pending = current.change;
+            enqueueReport(current.connection, pending.previous, "Stopped", pending.position, !pending.playWhenReady);
         }
+        releasePlayer(true);
+        playback = null;
         exitFullscreenPlayback();
     }
 
+    private void releasePlayer(boolean reportStop) {
+        ui.removeCallbacks(progress);
+        if (player != null) {
+            if (reportStop) report("Stopped");
+            playbackStarted = false;
+            stream = null;
+            ExoPlayer active = player;
+            player = null;
+            if (playback != null) playback.screen.setPlayer(null);
+            active.release();
+        }
+    }
+
     @Override public void onBackPressed() {
+        if (playback != null && playback.screen.dismissChoices()) return;
         if (backAction != null) backAction.run();
         else super.onBackPressed();
     }
 
     @Override protected void onStop() {
+        if (playback != null) {
+            playback.foreground = false;
+            playback.autoAdvancePending = false;
+            if (playback.change != null) playback.change.playWhenReady = false;
+        }
         if (player != null) {
             player.pause();
             report("Progress");
         }
         super.onStop();
+    }
+
+    @Override protected void onStart() {
+        super.onStart();
+        if (playback != null) playback.foreground = true;
     }
 
     @Override protected void onDestroy() {
@@ -1259,9 +1586,6 @@ public final class MainActivity extends Activity {
     private int dp(int value) { return Math.round(getResources().getDisplayMetrics().density * value); }
     private int contentGutter() { return dp(getResources().getConfiguration().screenWidthDp <= 355 ? 16 : 20); }
     private int screenWidth() { return Math.max(1, getResources().getDisplayMetrics().widthPixels - 2 * contentGutter()); }
-    private String displayTitle(JellyfinApi.Item item) {
-        return item.seriesName.isEmpty() ? item.title : item.seriesName + " · " + item.title;
-    }
     private void section(LinearLayout parent, String title) {
         TextView heading = libraryUi.label(title, 19, LibraryUi.TEXT, true);
         heading.setPadding(0, dp(18), 0, dp(9));

@@ -9,6 +9,7 @@ import java.net.Proxy;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 import okhttp3.Call;
 import okhttp3.Credentials;
@@ -160,6 +161,13 @@ final class JellyfinApi {
         return entries(items);
     }
 
+    List<Item> adjacentEpisodes(Item episode) throws Exception {
+        return entries(json("读取相邻剧集", url("Shows/" + episode.seriesId + "/Episodes")
+                .addQueryParameter("userId", userId).addQueryParameter("EnableUserData", "true")
+                .addQueryParameter("IsMissing", "false").addQueryParameter("AdjacentTo", episode.id)
+                .build(), null).getJSONArray("Items"));
+    }
+
     private static List<Item> entries(JSONArray items) throws Exception {
         List<Item> results = new ArrayList<>();
         for (int i = 0; i < items.length(); i++) {
@@ -169,33 +177,43 @@ final class JellyfinApi {
     }
 
     Stream stream(Item item, PlaybackPolicy policy) throws Exception {
-        JSONObject initial = playbackInfo(item, null, false, policy);
+        return stream(item, policy, null, null);
+    }
+
+    Stream stream(Item item, PlaybackPolicy policy, String requestedSource, Integer audioIndex) throws Exception {
+        JSONObject initial = playbackInfo(item, requestedSource, false, false, audioIndex, policy);
         JSONArray sources = initial.optJSONArray("MediaSources");
         if (sources == null || sources.length() == 0) throw new IOException("没有可用片源");
-        JSONObject source = sources.getJSONObject(0);
+        JSONObject source = requestedSource == null ? sources.getJSONObject(0) : findSource(initial, requestedSource);
         String sourceId = source.getString("Id");
         JSONObject video = firstVideo(source);
         int width = video.optInt("Width");
         int height = video.optInt("Height");
         boolean constrained = policy.requiresTranscode(width, height, source.optLong("Bitrate", video.optLong("BitRate")));
-        JSONObject info = constrained ? playbackInfo(item, sourceId, true, policy) : initial;
-        if (constrained) {
+        int defaultSubtitle = source.optInt("DefaultSubtitleStreamIndex", -1);
+        boolean hls = audioIndex != null || constrained
+                || !source.optBoolean("SupportsDirectPlay") && !source.optBoolean("SupportsDirectStream");
+        JSONObject info = hls ? playbackInfo(item, sourceId, constrained || audioIndex != null, true, audioIndex, policy) : initial;
+        if (hls) {
             source = findSource(info, sourceId);
         }
         String session = info.getString("PlaySessionId");
         HttpUrl streamUrl;
-        boolean hls = constrained || !source.optBoolean("SupportsDirectPlay") && !source.optBoolean("SupportsDirectStream");
         if (hls) {
             String path = source.optString("TranscodingUrl");
             if (path.isEmpty() || !source.optBoolean("SupportsTranscoding")) throw new IOException("服务端没有提供转码流");
             // A server with a base path may return a relative API path or an absolute path.
-            HttpUrl resolved = path.startsWith("/") && !path.startsWith("//")
-                    && !path.startsWith(settings.server.encodedPath()) ? settings.server.resolve(path.substring(1))
-                    : settings.server.resolve(path);
-            if (resolved == null || !sameServer(resolved) || !resolved.encodedPath().endsWith(".m3u8")) {
+            HttpUrl resolved = resolveServerUrl(path);
+            if (resolved == null || !resolved.encodedPath().endsWith(".m3u8")) {
                 throw new IOException("服务端没有提供可用的 HLS 地址");
             }
             HttpUrl.Builder request = resolved.newBuilder();
+            if (audioIndex != null) {
+                for (String key : resolved.queryParameterNames()) {
+                    if ("AudioStreamIndex".equalsIgnoreCase(key)) request.removeAllQueryParameters(key);
+                }
+                request.setQueryParameter("AudioStreamIndex", audioIndex.toString());
+            }
             if (policy.maxWidth > 0) {
                 request.removeAllQueryParameters("Width").removeAllQueryParameters("Height")
                         .setQueryParameter("MaxWidth", Integer.toString(policy.maxWidth))
@@ -223,7 +241,74 @@ final class JellyfinApi {
         Log.i(TAG, "Playback source=" + width + "x" + height + " constrained=" + constrained
                 + " HLS=" + hls + " maxWidth=" + policy.maxWidth + " maxHeight=" + policy.maxHeight
                 + " totalBudget=" + policy.totalBitrate);
-        return new Stream(item.id, sourceId, session, streamUrl, hls, constrained);
+        int resolvedAudio = source.optInt("DefaultAudioStreamIndex", -1);
+        if (hls) {
+            for (String key : streamUrl.queryParameterNames()) {
+                if ("AudioStreamIndex".equalsIgnoreCase(key)) {
+                    try {
+                        resolvedAudio = Integer.parseInt(streamUrl.queryParameter(key));
+                    } catch (NumberFormatException ignored) {
+                        // The server's default remains usable when the URL has no valid index.
+                    }
+                    break;
+                }
+            }
+        }
+        return new Stream(item.id, sourceId, session, streamUrl, hls, constrained, resolvedAudio, defaultSubtitle,
+                mediaTracks(item.id, source, "Audio"), mediaTracks(item.id, source, "Subtitle"));
+    }
+
+    private HttpUrl resolveServerUrl(String path) {
+        HttpUrl resolved = path.startsWith("/") && !path.startsWith("//")
+                && !path.startsWith(settings.server.encodedPath()) ? settings.server.resolve(path.substring(1))
+                : settings.server.resolve(path);
+        return resolved != null && sameServer(resolved) ? resolved : null;
+    }
+
+    private List<MediaTrack> mediaTracks(String itemId, JSONObject source, String type) {
+        List<MediaTrack> result = new ArrayList<>();
+        JSONArray tracks = source.optJSONArray("MediaStreams");
+        for (int i = 0; tracks != null && i < tracks.length(); i++) {
+            JSONObject track = tracks.optJSONObject(i);
+            if (track == null || !type.equals(track.optString("Type"))) continue;
+            int index = track.optInt("Index", -1);
+            if (index < 0) continue;
+            String language = track.optString("Language", "");
+            String title = track.optString("DisplayTitle", track.optString("Title", ""));
+            String codec = track.optString("Codec", "").toLowerCase(Locale.ROOT);
+            HttpUrl uri = null;
+            String format = codec;
+            boolean external = track.optBoolean("IsExternal");
+            if ("Subtitle".equals(type)) {
+                if ("subrip".equals(format)) format = "srt";
+                if ("webvtt".equals(format)) format = "vtt";
+                boolean nativeText = "srt".equals(format) || "vtt".equals(format)
+                        || "ass".equals(format) || "ssa".equals(format);
+                if (!nativeText && !track.optBoolean("IsTextSubtitleStream")) continue;
+                if (!nativeText) format = "vtt";
+                String delivery = track.optString("DeliveryUrl", "");
+                HttpUrl delivered = delivery.isEmpty() ? null : resolveServerUrl(delivery);
+                if (delivered != null && delivered.encodedPath().endsWith("/Stream." + format)
+                        && delivered.queryParameter("startPositionTicks") == null) {
+                    HttpUrl.Builder subtitleUrl = delivered.newBuilder();
+                    for (String key : delivered.queryParameterNames()) {
+                        if ("api_key".equalsIgnoreCase(key) || "apiKey".equalsIgnoreCase(key)) {
+                            subtitleUrl.removeAllQueryParameters(key);
+                        }
+                    }
+                    uri = subtitleUrl.build();
+                } else {
+                    uri = url("Videos").addPathSegment(itemId).addPathSegment(source.optString("Id"))
+                            .addPathSegment("Subtitles").addPathSegment(Integer.toString(index))
+                            .addPathSegment("Stream." + format).build();
+                }
+            }
+            String label = title.isEmpty() ? language : title;
+            if (label.isEmpty()) label = (uri == null ? "音轨 " : "字幕 ") + index;
+            if (uri != null) label += external ? " · 外挂" : " · 内嵌";
+            result.add(new MediaTrack(index, label, language, format, uri));
+        }
+        return result;
     }
 
     void report(Stream stream, String event, long positionMs, boolean paused) throws Exception {
@@ -253,12 +338,15 @@ final class JellyfinApi {
         throw new IOException("服务端未为选中的片源返回转码信息");
     }
 
-    private JSONObject playbackInfo(Item item, String source, boolean constrained, PlaybackPolicy policy) throws Exception {
+    private JSONObject playbackInfo(Item item, String source, boolean constrained, boolean clientSubtitles,
+                                    Integer audioIndex, PlaybackPolicy policy) throws Exception {
         JSONObject body = new JSONObject().put("UserId", userId).put("DeviceProfile", profile());
         if (policy.totalBitrate > 0) body.put("MaxStreamingBitrate", policy.totalBitrate);
+        if (source != null) body.put("MediaSourceId", source);
+        if (audioIndex != null) body.put("AudioStreamIndex", audioIndex);
+        if (clientSubtitles) body.put("SubtitleStreamIndex", -1);
         if (constrained) {
-            body.put("MediaSourceId", source)
-                    .put("EnableDirectPlay", false).put("EnableDirectStream", false)
+            body.put("EnableDirectPlay", false).put("EnableDirectStream", false)
                     .put("EnableTranscoding", true).put("AllowVideoStreamCopy", false).put("AllowAudioStreamCopy", false);
         }
         return json("播放协商", url("Items/" + item.id + "/PlaybackInfo").build(), body);
@@ -269,10 +357,14 @@ final class JellyfinApi {
                 .put("VideoCodec", "h264,hevc").put("AudioCodec", "aac,mp3,ac3,eac3,opus");
         JSONObject transcode = new JSONObject().put("Type", "Video").put("Context", "Streaming")
                 .put("Protocol", "hls").put("Container", "ts").put("VideoCodec", "h264").put("AudioCodec", "aac");
+        JSONArray subtitles = new JSONArray();
+        for (String format : new String[] { "srt", "subrip", "vtt", "webvtt", "ass", "ssa" }) {
+            subtitles.put(new JSONObject().put("Format", format).put("Method", "External"));
+        }
         return new JSONObject().put("Name", "Jellyfin Playback Probe")
                 .put("MaxStreamingBitrate", 120_000_000).put("MaxStaticBitrate", 120_000_000)
                 .put("DirectPlayProfiles", new JSONArray().put(direct))
-                .put("TranscodingProfiles", new JSONArray().put(transcode));
+                .put("TranscodingProfiles", new JSONArray().put(transcode)).put("SubtitleProfiles", subtitles);
     }
 
     OkHttpClient client() { return http; }
@@ -341,9 +433,28 @@ final class JellyfinApi {
         final String itemId, sourceId, session;
         final HttpUrl url;
         final boolean hls, constrained;
-        Stream(String itemId, String sourceId, String session, HttpUrl url, boolean hls, boolean constrained) {
+        final int audioIndex, defaultSubtitleIndex;
+        final List<MediaTrack> audio, subtitles;
+        Stream(String itemId, String sourceId, String session, HttpUrl url, boolean hls, boolean constrained,
+               int audioIndex, int defaultSubtitleIndex, List<MediaTrack> audio, List<MediaTrack> subtitles) {
             this.itemId = itemId; this.sourceId = sourceId; this.session = session;
             this.url = url; this.hls = hls; this.constrained = constrained;
+            this.audioIndex = audioIndex; this.defaultSubtitleIndex = defaultSubtitleIndex;
+            this.audio = audio; this.subtitles = subtitles;
+        }
+    }
+
+    static final class MediaTrack {
+        final int index;
+        final String label, language, format;
+        final HttpUrl subtitleUrl;
+
+        MediaTrack(int index, String label, String language, String format, HttpUrl subtitleUrl) {
+            this.index = index;
+            this.label = label;
+            this.language = language;
+            this.format = format;
+            this.subtitleUrl = subtitleUrl;
         }
     }
 }
