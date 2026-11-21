@@ -161,7 +161,7 @@ final class FullscreenPlaybackView extends FrameLayout {
         message = style.label("", 15, LibraryUi.TEXT, false);
         message.setGravity(Gravity.CENTER);
         message.setPadding(dp(16), dp(12), dp(16), dp(12));
-        message.setBackground(style.rounded(0xc0202020, 12));
+        message.setBackground(style.rounded(0xc0202020, LibraryUi.RADIUS_PANEL));
         message.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         LayoutParams messageBounds = new LayoutParams(-2, -2, Gravity.CENTER);
         messageBounds.setMargins(dp(24), 0, dp(24), 0);
@@ -169,7 +169,7 @@ final class FullscreenPlaybackView extends FrameLayout {
 
         trackPanel = style.column();
         trackPanel.setId(R.id.playback_track_panel);
-        trackPanel.setBackground(outline(0xf5111a20, 0x96657785, 15));
+        trackPanel.setBackground(outline(0xf5111a20, 0x96657785, LibraryUi.RADIUS_PANEL));
         trackPanel.setPadding(dp(10), dp(5), dp(10), dp(10));
         trackPanel.setClickable(true);
         trackPanel.setVisibility(GONE);
@@ -223,7 +223,7 @@ final class FullscreenPlaybackView extends FrameLayout {
         button.setMinWidth(dp(44));
         button.setPadding(dp(8), 0, dp(8), 0);
         button.setContentDescription(description);
-        button.setBackground(outline(CONTROL_BACKGROUND, CONTROL_BORDER, 12));
+        button.setBackground(outline(CONTROL_BACKGROUND, CONTROL_BORDER, LibraryUi.RADIUS_CONTROL));
         style.actionable(button, () -> {
             action.run();
             restartControlsTimeout();
@@ -543,7 +543,7 @@ final class FullscreenPlaybackView extends FrameLayout {
         }
         dismissChoices();
         activeTrackButton = trigger;
-        activeTrackButton.setBackground(outline(SELECTED_BACKGROUND, 0x8059c7ed, 12));
+        activeTrackButton.setBackground(outline(SELECTED_BACKGROUND, 0x8059c7ed, LibraryUi.RADIUS_CONTROL));
         trackTitle.setText(name);
         trackList.removeAllViews();
         View focus = null;
@@ -575,7 +575,8 @@ final class FullscreenPlaybackView extends FrameLayout {
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPadding(dp(10), 0, dp(8), 0);
         row.setSelected(selected);
-        row.setBackground(style.rounded(selected ? SELECTED_BACKGROUND : Color.TRANSPARENT, 9));
+        row.setBackground(style.rounded(selected ? SELECTED_BACKGROUND : Color.TRANSPARENT,
+                LibraryUi.RADIUS_CONTROL));
         LinearLayout copy = style.column();
         copy.addView(singleLine(lines[0], 14, selected ? 0xffa6e9ff : LibraryUi.TEXT, selected));
         if (lines.length > 1) copy.addView(singleLine(lines[1], 11, LIGHT_TEXT, false));
@@ -609,7 +610,7 @@ final class FullscreenPlaybackView extends FrameLayout {
     boolean dismissChoices() {
         if (activeTrackButton == null) return false;
         trackPanel.setVisibility(GONE);
-        activeTrackButton.setBackground(outline(CONTROL_BACKGROUND, CONTROL_BORDER, 12));
+        activeTrackButton.setBackground(outline(CONTROL_BACKGROUND, CONTROL_BORDER, LibraryUi.RADIUS_CONTROL));
         activeTrackButton.requestFocus();
         activeTrackButton = null;
         restartControlsTimeout();

@@ -36,6 +36,9 @@ final class LibraryUi {
     static final int ON_ACCENT = 0xff061820;
     static final int SELECTED = 0x2500a4dc;
     static final int ERROR = 0xffffabad;
+    static final int RADIUS_SMALL = 4;
+    static final int RADIUS_CONTROL = 6;
+    static final int RADIUS_PANEL = 8;
 
     private final Context context;
     private final Handler main;
@@ -89,7 +92,8 @@ final class LibraryUi {
 
     void actionable(View view, Runnable action) {
         view.setFocusable(true);
-        view.setForeground(new RippleDrawable(ColorStateList.valueOf(0x3059c7ed), null, rounded(Color.WHITE, 12)));
+        view.setForeground(new RippleDrawable(ColorStateList.valueOf(0x3059c7ed), null,
+                rounded(Color.WHITE, RADIUS_CONTROL)));
         view.setOnClickListener(ignored -> action.run());
     }
 
@@ -143,7 +147,7 @@ final class LibraryUi {
     }
 
     private View card(JellyfinApi.Item item, boolean wide, boolean progress, int width, Runnable details, Runnable play) {
-        int radius = progress ? 14 : 11;
+        int radius = progress ? RADIUS_PANEL : RADIUS_CONTROL;
         LinearLayout tile = column();
         FrameLayout cover = picture(item, wide, progress ? 0 : radius);
         int imageWidth = width;
@@ -189,14 +193,27 @@ final class LibraryUi {
             info.setEllipsize(TextUtils.TruncateAt.END);
             copy.addView(info);
         }
-        if (play != null) {
-            String description = (progress ? "继续观看 " : "播放 ") + name + (episode.isEmpty() ? "" : " " + episode);
-            addQuickPlayButton(cover, imageHeight, progress, description, play);
-        }
         if (progress) {
+            View shade = new View(context);
+            shade.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                    new int[] { Color.TRANSPARENT, 0xe805090c }));
+            cover.addView(shade, new FrameLayout.LayoutParams(-1, Math.round(imageHeight * 0.57f), Gravity.BOTTOM));
             if (item.durationMs > 0) positionBar(cover, item.resumeMs, item.durationMs);
             String watchTime = time(item.resumeMs) + (item.durationMs > 0 ? " / " + time(item.durationMs) : "");
-            copy.addView(label(watchTime, 11, MUTED, false));
+            TextView elapsed = label(watchTime, 11, TEXT, false);
+            elapsed.setSingleLine(true);
+            elapsed.setEllipsize(TextUtils.TruncateAt.END);
+            elapsed.setFontFeatureSettings("'tnum'");
+            elapsed.setShadowLayer(dp(2), 0, dp(1), 0xcc000000);
+            FrameLayout.LayoutParams timeBounds = new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM | Gravity.START);
+            timeBounds.setMarginStart(dp(10));
+            timeBounds.setMarginEnd(dp(play == null ? 10 : 54));
+            timeBounds.bottomMargin = dp(16);
+            cover.addView(elapsed, timeBounds);
+        }
+        if (play != null) {
+            String description = (progress ? "继续观看 " : "播放 ") + name + (episode.isEmpty() ? "" : " " + episode);
+            addQuickPlayButton(cover, progress, description, play);
         }
         actionable(tile, details);
         return tile;
@@ -209,7 +226,7 @@ final class LibraryUi {
     }
 
     FrameLayout picture(JellyfinApi.Item item, boolean wide) {
-        return picture(item, wide, 14);
+        return picture(item, wide, RADIUS_SMALL);
     }
 
     private FrameLayout picture(JellyfinApi.Item item, boolean wide, int radius) {
@@ -255,13 +272,7 @@ final class LibraryUi {
         return cover;
     }
 
-    private void addQuickPlayButton(FrameLayout cover, int imageHeight, boolean progress, String description, Runnable action) {
-        if (progress) {
-            View shade = new View(context);
-            shade.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                    new int[] { Color.TRANSPARENT, 0xe805090c }));
-            cover.addView(shade, new FrameLayout.LayoutParams(-1, Math.round(imageHeight * 0.57f), Gravity.BOTTOM));
-        }
+    private void addQuickPlayButton(FrameLayout cover, boolean progress, String description, Runnable action) {
         TextView play = label("▶", 13, TEXT, false);
         play.setGravity(Gravity.CENTER);
         play.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);

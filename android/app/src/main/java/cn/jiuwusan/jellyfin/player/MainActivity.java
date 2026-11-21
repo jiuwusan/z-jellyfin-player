@@ -203,7 +203,7 @@ public final class MainActivity extends Activity {
         TextView button = libraryUi.label(icon, 23, LibraryUi.TEXT, true);
         button.setContentDescription(description);
         button.setGravity(Gravity.CENTER);
-        GradientDrawable background = libraryUi.rounded(0x0cffffff, 12);
+        GradientDrawable background = libraryUi.rounded(0x0cffffff, LibraryUi.RADIUS_CONTROL);
         background.setStroke(dp(1), 0x0fffffff);
         button.setBackground(background);
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(44), dp(44));
@@ -231,7 +231,7 @@ public final class MainActivity extends Activity {
             row.addView(target, new LinearLayout.LayoutParams(0, -2, 1));
             TextView icon = libraryUi.label(tab.icon, 19, color, true);
             icon.setGravity(Gravity.CENTER);
-            if (active) icon.setBackground(libraryUi.rounded(LibraryUi.SELECTED, 16));
+            if (active) icon.setBackground(libraryUi.rounded(LibraryUi.SELECTED, LibraryUi.RADIUS_CONTROL));
             icon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
             target.addView(icon, new LinearLayout.LayoutParams(dp(53), dp(28)));
             TextView label = libraryUi.label(tab.title, 12, color, active);
@@ -337,7 +337,7 @@ public final class MainActivity extends Activity {
         spinner.setSelection(selection);
         spinner.setContentDescription(title);
         spinner.setBackgroundTintList(ColorStateList.valueOf(0xff575757));
-        spinner.setPopupBackgroundDrawable(libraryUi.rounded(LibraryUi.PANEL, 12));
+        spinner.setPopupBackgroundDrawable(libraryUi.rounded(LibraryUi.PANEL, LibraryUi.RADIUS_PANEL));
         group.addView(spinner, new LinearLayout.LayoutParams(-1, dp(44)));
         return spinner;
     }
@@ -345,7 +345,7 @@ public final class MainActivity extends Activity {
     private void confirmSettings(ConnectionSettings candidate) {
         LinearLayout body = column();
         body.setPadding(dp(21), dp(21), dp(21), dp(21));
-        GradientDrawable backdrop = libraryUi.rounded(LibraryUi.PANEL, 18);
+        GradientDrawable backdrop = libraryUi.rounded(LibraryUi.PANEL, LibraryUi.RADIUS_PANEL);
         backdrop.setStroke(dp(1), 0xff454545);
         body.setBackground(backdrop);
         body.addView(libraryUi.label("确认保存设置", 20, LibraryUi.TEXT, true));
@@ -391,7 +391,7 @@ public final class MainActivity extends Activity {
         int[] states = { android.R.attr.state_activated, android.R.attr.state_focused };
         int[] colors = { LibraryUi.ERROR, LibraryUi.ACCENT_LIGHT, 0xff484848 };
         for (int i = 0; i < colors.length; i++) {
-            GradientDrawable shape = libraryUi.rounded(LibraryUi.INPUT, 9);
+            GradientDrawable shape = libraryUi.rounded(LibraryUi.INPUT, LibraryUi.RADIUS_CONTROL);
             shape.setStroke(dp(1), colors[i]);
             background.addState(i < states.length ? new int[] { states[i] } : new int[0], shape);
         }
@@ -989,7 +989,8 @@ public final class MainActivity extends Activity {
         tab.setSelected(selected);
         tab.setTextColor(selected ? LibraryUi.ACCENT_LIGHT : LibraryUi.MUTED);
         tab.setTypeface(Typeface.DEFAULT, selected ? Typeface.BOLD : Typeface.NORMAL);
-        GradientDrawable background = libraryUi.rounded(selected ? LibraryUi.SELECTED : LibraryUi.SURFACE, 23);
+        GradientDrawable background = libraryUi.rounded(selected ? LibraryUi.SELECTED : LibraryUi.SURFACE,
+                LibraryUi.RADIUS_CONTROL);
         background.setStroke(dp(1), selected ? 0x9200a4dc : LibraryUi.LINE);
         tab.setBackground(background);
     }
@@ -1052,7 +1053,7 @@ public final class MainActivity extends Activity {
     private void watched(LinearLayout parent) {
         TextView badge = libraryUi.label("✓ 已看完", 11, LibraryUi.ACCENT_LIGHT, true);
         badge.setPadding(dp(8), dp(5), dp(8), dp(5));
-        badge.setBackground(libraryUi.rounded(LibraryUi.SELECTED, 15));
+        badge.setBackground(libraryUi.rounded(LibraryUi.SELECTED, LibraryUi.RADIUS_SMALL));
         parent.addView(badge, new LinearLayout.LayoutParams(-2, -2));
     }
 
@@ -1611,7 +1612,8 @@ public final class MainActivity extends Activity {
         button.setText(title);
         button.setAllCaps(false);
         button.setTextColor(primary ? LibraryUi.ON_ACCENT : LibraryUi.TEXT);
-        GradientDrawable background = libraryUi.rounded(primary ? LibraryUi.ACCENT : LibraryUi.PANEL, 10);
+        GradientDrawable background = libraryUi.rounded(primary ? LibraryUi.ACCENT : LibraryUi.PANEL,
+                LibraryUi.RADIUS_CONTROL);
         if (!primary) background.setStroke(dp(1), LibraryUi.LINE);
         button.setBackground(background);
         button.setTextSize(14);

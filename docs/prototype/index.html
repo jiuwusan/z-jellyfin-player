@@ -136,10 +136,13 @@ function card(id,mode="poster"){
  const landscape=resume||mode==="next-up";
  const name=episode?parentName(i):i.name;
  const detail=episode?epLabel(i)+(resume?"":" · "+i.name):i.type+" · "+i.year;
- const watchTime=resume?'<span class="sub watchTime">'+time(records[id])+" / "+time(i.length)+'</span>':"";
- const details='<button class="card" data-detail="'+id+'">'+
- '<span class="cover '+(landscape?"landscape":"")+'">'+art(i.art)+(resume?'<span class="resumeShade"></span>'+progress(id):"")+'</span>'+
- '<span class="cardCopy"><span class="name">'+esc(name)+'</span><span class="sub">'+esc(detail)+'</span>'+watchTime+'</span></button>';
+ const watchTime=resume?time(records[id])+" / "+time(i.length):"";
+ const coverInfo=resume?'<span class="resumeShade" aria-hidden="true"></span>'+
+ '<span class="watchTime">'+watchTime+'</span>'+progress(id):"";
+ const label=resume?' aria-label="'+esc(name+"，"+detail+"，已观看 "+watchTime)+'"':"";
+ const details='<button class="card" data-detail="'+id+'"'+label+'>'+
+ '<span class="cover '+(landscape?"landscape":"")+'">'+art(i.art)+coverInfo+'</span>'+
+ '<span class="cardCopy"><span class="name">'+esc(name)+'</span><span class="sub">'+esc(detail)+'</span></span></button>';
  if(!landscape)return details;
  const playLabel=(resume?"继续观看 ":"播放 ")+name+(episode?" "+epLabel(i):"");
  return '<div class="quickPlayCard">'+details+'<div class="quickPlayOverlay"><button class="quickPlayButton" type="button"'+
