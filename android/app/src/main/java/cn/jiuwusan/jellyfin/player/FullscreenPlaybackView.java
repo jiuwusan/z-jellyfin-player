@@ -7,6 +7,7 @@ import android.os.Build;
 import android.text.TextUtils;
 import android.view.DisplayCutout;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
@@ -28,6 +29,7 @@ final class FullscreenPlaybackView extends FrameLayout {
     private static final int LIGHT_TEXT = 0xffc9d8de;
     private static final int SELECTED_BACKGROUND = 0xff13333f;
     private static final int CHOICE_HEIGHT = 49;
+    private static final long CONTROLS_TIMEOUT_MS = 5_000;
 
     private final LibraryUi style;
     private final PlayerView video;
@@ -46,6 +48,7 @@ final class FullscreenPlaybackView extends FrameLayout {
     private boolean controlsVisible = true;
     private boolean transportEnabled;
     private boolean scrubbing;
+    private boolean touching;
     private boolean soughtToEnd;
     private int leftInset, topInset, rightInset, bottomInset;
     private long shownDuration = C.TIME_UNSET, shownPosition, shownBuffer;
@@ -53,7 +56,11 @@ final class FullscreenPlaybackView extends FrameLayout {
     private final Player.Listener playerEvents = new Player.Listener() {
         @Override public void onEvents(Player source, Player.Events events) {
             restartRefresh();
+            if (events.contains(Player.EVENT_IS_PLAYING_CHANGED)) restartControlsTimeout();
         }
+    };
+    private final Runnable hideControls = () -> {
+        if (!controlsMustStayVisible() && !touching) setControlsVisible(false);
     };
     private final Runnable refresh = new Runnable() {
         @Override public void run() {
@@ -78,7 +85,10 @@ final class FullscreenPlaybackView extends FrameLayout {
         touchSurface.setId(R.id.playback_controls_toggle);
         touchSurface.setFocusable(true);
         touchSurface.setOnClickListener(view -> {
-            if (!dismissChoices()) setControlsVisible(!controlsVisible);
+            if (!dismissChoices() && !controlsMustStayVisible()) {
+                setControlsVisible(!controlsVisible);
+                restartControlsTimeout();
+            }
         });
         addView(touchSurface, new LayoutParams(-1, -1));
 
@@ -209,7 +219,10 @@ final class FullscreenPlaybackView extends FrameLayout {
         button.setPadding(dp(8), 0, dp(8), 0);
         button.setContentDescription(description);
         button.setBackground(outline(CONTROL_BACKGROUND, CONTROL_BORDER, 12));
-        style.actionable(button, action);
+        style.actionable(button, () -> {
+            action.run();
+            restartControlsTimeout();
+        });
         return button;
     }
 
@@ -248,6 +261,7 @@ final class FullscreenPlaybackView extends FrameLayout {
         scrubbing = false;
         soughtToEnd = false;
         restartRefresh();
+        restartControlsTimeout();
     }
 
     void updateActions(boolean episodic, boolean canGoBack, boolean canGoNext, boolean textAvailable,
@@ -275,6 +289,7 @@ final class FullscreenPlaybackView extends FrameLayout {
         timeline.addListener(new TimeBar.OnScrubListener() {
             @Override public void onScrubStart(TimeBar bar, long position) {
                 scrubbing = true;
+                restartControlsTimeout();
                 updateTime(position, player == null ? C.TIME_UNSET : player.getDuration());
             }
 
@@ -286,6 +301,7 @@ final class FullscreenPlaybackView extends FrameLayout {
                 scrubbing = false;
                 if (!canceled && canSeek()) seekTo(position);
                 refreshControls();
+                restartControlsTimeout();
             }
         });
     }
@@ -367,11 +383,28 @@ final class FullscreenPlaybackView extends FrameLayout {
     @Override protected void onAttachedToWindow() {
         super.onAttachedToWindow();
         restartRefresh();
+        restartControlsTimeout();
     }
 
     @Override protected void onDetachedFromWindow() {
         removeCallbacks(refresh);
+        removeCallbacks(hideControls);
+        touching = false;
         super.onDetachedFromWindow();
+    }
+
+    @Override public boolean dispatchTouchEvent(MotionEvent event) {
+        int action = event.getActionMasked();
+        if (action == MotionEvent.ACTION_DOWN) {
+            touching = true;
+            removeCallbacks(hideControls);
+        }
+        boolean handled = super.dispatchTouchEvent(event);
+        if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+            touching = false;
+            restartControlsTimeout();
+        }
+        return handled;
     }
 
     void showMessage(String text) {
@@ -379,18 +412,47 @@ final class FullscreenPlaybackView extends FrameLayout {
         message.setText(text);
         message.setVisibility(VISIBLE);
         setControlsVisible(true);
+        restartControlsTimeout();
     }
 
     void showVideo() {
         message.setVisibility(GONE);
         refreshControls();
+        restartControlsTimeout();
+    }
+
+    private boolean controlsMustStayVisible() {
+        return player == null || !player.isPlaying() || message.getVisibility() == VISIBLE
+                || scrubbing || activeTrackButton != null;
+    }
+
+    private void restartControlsTimeout() {
+        removeCallbacks(hideControls);
+        if (!isAttachedToWindow()) return;
+        if (controlsMustStayVisible()) {
+            if (!controlsVisible) setControlsVisible(true);
+        } else if (controlsVisible && !touching) {
+            postDelayed(hideControls, CONTROLS_TIMEOUT_MS);
+        }
+        describeTouchSurface();
+    }
+
+    private void describeTouchSurface() {
+        String description = "显示播放控制";
+        if (controlsVisible) {
+            if (activeTrackButton != null) description = "收起轨道菜单";
+            else description = controlsMustStayVisible() ? "播放画面" : "隐藏播放控制";
+        }
+        if (!TextUtils.equals(touchSurface.getContentDescription(), description)) {
+            touchSurface.setContentDescription(description);
+        }
     }
 
     private void setControlsVisible(boolean visible) {
         controlsVisible = visible;
         header.setVisibility(visible ? VISIBLE : GONE);
         bottom.setVisibility(visible ? VISIBLE : GONE);
-        touchSurface.setContentDescription(visible ? "隐藏播放控制" : "显示播放控制");
+        describeTouchSurface();
         post(this::liftCaptions);
         restartRefresh();
     }
@@ -454,6 +516,7 @@ final class FullscreenPlaybackView extends FrameLayout {
             if (i == selected || focus == null) focus = option;
         }
         trackPanel.setVisibility(VISIBLE);
+        restartControlsTimeout();
         fitTrackList();
         trackScroll.scrollTo(0, 0);
         if (focus != null) {
@@ -510,6 +573,7 @@ final class FullscreenPlaybackView extends FrameLayout {
         activeTrackButton.setBackground(outline(CONTROL_BACKGROUND, CONTROL_BORDER, 12));
         activeTrackButton.requestFocus();
         activeTrackButton = null;
+        restartControlsTimeout();
         return true;
     }
 }

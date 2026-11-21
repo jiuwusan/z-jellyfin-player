@@ -82,6 +82,8 @@ const initialScreen=new URLSearchParams(location.search).get("screen");
 let current={page:initialScreen==="splash"?"splash":"home"};
 const stack=[];
 let playTime=0, playing=false, timer=null, playerKey="";
+const controlsTimeoutMs=5000;
+let controlsTimeout, bufferTimeout, buffering=false, playerPointer=null, scrubbing=false;
 let playerTracks={audio:0,subtitle:0};
 const audioOptions=[["国语","原声 · AAC 2.0"],["粤语","配音 · AAC 2.0"]];
 const subtitleOptions=[["自动","使用 Jellyfin 的字幕偏好"],["关闭",""],["简体中文","Jellyfin 外挂 · SRT"],["English","Jellyfin 外挂 · WebVTT"]];
@@ -113,6 +115,9 @@ function leavePlayer(){
  if(!playerKey)return;
  if(playTime>0)records[playerKey]=Math.min(playTime,catalog[playerKey].length);
  clearInterval(timer);timer=null;playing=false;playerKey="";
+ clearTimeout(controlsTimeout);
+ clearTimeout(bufferTimeout);
+ buffering=false;playerPointer=null;scrubbing=false;
 }
 function navigate(page, opts={}, replace=false){
  if(current.page==="player")leavePlayer();
@@ -223,6 +228,7 @@ function player(){
     (i.parent?episodeButton(adjacentEpisode(current.id,1),"下一集","›"):"")+'</div>'+
     '<span class="playerQuality" title="播放画质上限">'+esc(resolution+" · "+bitrate)+'</span></div></div></div>'+
   '<div class="playerCaption" aria-hidden="true" hidden><span></span></div>'+
+  '<div class="playerBuffering" role="status" hidden>正在缓冲…</div>'+
   '<section class="trackMenu" id="track-menu" role="dialog" aria-labelledby="track-title" hidden></section></section>';
 }
 function splash(){
@@ -261,8 +267,10 @@ function showPlayer(id,position,replaceEpisode=false){
  render();
  updateTime();
  updateCaption();
+ if(playing)simulateBuffering();
+ else restartControlsTimeout();
  timer=setInterval(()=>{
-  if(!playing||!playerKey)return;
+  if(!playing||!playerKey||buffering||scrubbing)return;
   const max=catalog[playerKey].length;
   playTime=Math.min(playTime+1,max);
   if(playTime===max){
@@ -286,12 +294,50 @@ function setPlaying(value){
  const button=main.querySelector("[data-toggle-player]");
  button.dataset.playing=String(playing);
  button.setAttribute("aria-label",playing?"暂停":"播放");
+ restartControlsTimeout();
 }
 function seekTo(position){
  const duration=catalog[playerKey].length;
  playTime=Math.min(duration,Math.max(0,position));
  if(playTime===duration)setPlaying(false);
  updateTime();
+ restartControlsTimeout();
+}
+function controlsMustStayVisible(){
+ return !playing||buffering||!main.querySelector(".trackMenu").hidden;
+}
+function describeTouchSurface(){
+ const button=main.querySelector(".playerSurface"), controls=main.querySelector(".playerControls");
+ const label=controls.hidden?"显示播放控制":!main.querySelector(".trackMenu").hidden?"收起轨道菜单":
+  controlsMustStayVisible()?"播放画面":"隐藏播放控制";
+ button.setAttribute("aria-expanded",String(!controls.hidden));
+ button.setAttribute("aria-label",label);
+}
+function restartControlsTimeout(){
+ clearTimeout(controlsTimeout);
+ if(!playerKey)return;
+ const controls=main.querySelector(".playerControls");
+ if(controlsMustStayVisible())controls.hidden=false;
+ else if(playerPointer===null&&!controls.hidden){
+  controlsTimeout=setTimeout(()=>{
+   if(controlsMustStayVisible()||playerPointer!==null)return;
+   controls.hidden=true;
+   describeTouchSurface();
+  },controlsTimeoutMs);
+ }
+ describeTouchSurface();
+}
+function simulateBuffering(){
+ clearTimeout(bufferTimeout);
+ const indicator=main.querySelector(".playerBuffering");
+ indicator.hidden=false;
+ buffering=true;
+ restartControlsTimeout();
+ bufferTimeout=setTimeout(()=>{
+  indicator.hidden=true;
+  buffering=false;
+  restartControlsTimeout();
+ },400);
 }
 function updateCaption(){
  const caption=main.querySelector(".playerCaption");
@@ -304,6 +350,7 @@ function closeTracks(restoreFocus=true){
  menu.hidden=true;
  const trigger=main.querySelector('[data-track-menu][aria-expanded="true"]');
  if(trigger){trigger.setAttribute("aria-expanded","false");if(restoreFocus)trigger.focus();}
+ restartControlsTimeout();
  return true;
 }
 function showTracks(type){
@@ -320,13 +367,13 @@ function showTracks(type){
  menu.hidden=false;
  main.querySelector('[data-track-menu="'+type+'"]').setAttribute("aria-expanded","true");
  menu.querySelector('[aria-pressed="true"]').focus();
+ restartControlsTimeout();
 }
-function togglePlayerControls(button){
- if(closeTracks())return;
+function togglePlayerControls(){
+ if(closeTracks()||controlsMustStayVisible())return;
  const controls=main.querySelector(".playerControls");
  controls.hidden=!controls.hidden;
- button.setAttribute("aria-expanded",String(!controls.hidden));
- button.setAttribute("aria-label",controls.hidden?"显示播放控制":"隐藏播放控制");
+ restartControlsTimeout();
 }
 function switchSeason(tab){
  const seasons=tab.closest(".seasonTabs");
@@ -359,9 +406,27 @@ document.addEventListener("click",e=>{
  else if("offset" in d)seekTo(playTime+Number(d.offset));
  else if(d.trackMenu)showTracks(d.trackMenu);
  else if("closeTracks" in d)closeTracks();
- else if("trackChoice" in d){playerTracks[button.closest(".trackMenu").dataset.track]=Number(d.trackChoice);updateCaption();closeTracks();}
- else if("toggleControls" in d)togglePlayerControls(button);
+ else if("trackChoice" in d){
+  const type=button.closest(".trackMenu").dataset.track, choice=Number(d.trackChoice);
+  const audioChanged=type==="audio"&&choice!==playerTracks.audio;
+  playerTracks[type]=choice;updateCaption();closeTracks();
+  if(audioChanged)simulateBuffering();
+ }
+ else if("toggleControls" in d)togglePlayerControls();
 });
+document.addEventListener("pointerdown",e=>{
+ if(!playerKey||playerPointer!==null||!e.target.closest(".theater"))return;
+ playerPointer=e.pointerId;
+ scrubbing=e.target.id==="seek";
+ restartControlsTimeout();
+});
+function endPlayerGesture(e){
+ if(playerPointer!==e.pointerId)return;
+ playerPointer=null;scrubbing=false;
+ restartControlsTimeout();
+}
+document.addEventListener("pointerup",endPlayerGesture);
+document.addEventListener("pointercancel",endPlayerGesture);
 document.addEventListener("input",e=>{
  if(e.target.id==="search-input"){
   current.query=e.target.value;
@@ -404,6 +469,7 @@ settingsDialog.addEventListener("close",()=>{
 document.addEventListener("keydown",e=>{
  if(settingsDialog.open)return;
  if(e.key==="Escape"&&stack.length){if(!closeTracks())back();return;}
+ if(playerKey&&e.target instanceof Element&&e.target.closest(".theater"))restartControlsTimeout();
  if(!e.target.matches("[data-season]"))return;
  const tabs=[...e.target.closest(".seasonTabs").querySelectorAll("[data-season]")];
  const index=tabs.indexOf(e.target);

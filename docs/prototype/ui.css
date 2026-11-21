@@ -367,6 +367,11 @@ main[data-screen="player"] { display: grid; overflow: hidden; }
   color: #fff; font-size: clamp(15px, 2.5vw, 25px); font-weight: 700; pointer-events: none;
 }
 .playerCaption span { display: inline-block; padding: 4px 10px; border-radius: 5px; background: #03080cd9; }
+.playerBuffering {
+  position: absolute; z-index: 3; top: 50%; left: 50%; transform: translate(-50%,-50%);
+  padding: 10px 15px; color: var(--text); background: #111a20e8; border-radius: 10px;
+  font-size: 13px; white-space: nowrap; pointer-events: none;
+}
 .playerControls:not([hidden]) + .playerCaption { bottom: 110px; }
 .trackMenu {
   position: absolute; z-index: 4; inset: 72px var(--player-gutter) auto auto; width: min(274px, calc(100% - 28px));
