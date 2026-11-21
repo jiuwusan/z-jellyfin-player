@@ -33,7 +33,7 @@ final class StartupSplashView extends FrameLayout {
         identity.setTranslationY(-style.dp(16));
         identity.addView(style.brandMark(), new LinearLayout.LayoutParams(style.dp(140), style.dp(140)));
 
-        TextView name = style.label("Jellyfin", 43, LibraryUi.TEXT, true);
+        TextView name = style.label(context.getString(R.string.app_name), 43, LibraryUi.TEXT, true);
         name.setLetterSpacing(-0.06f);
         name.setIncludeFontPadding(false);
         LinearLayout.LayoutParams nameBounds = new LinearLayout.LayoutParams(-2, -2);

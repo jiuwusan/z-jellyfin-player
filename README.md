@@ -1,4 +1,4 @@
-# Jellyfin 家庭影音
+# z-jellyfin
 
 面向家庭使用的原生 Jellyfin 播放客户端。Android 和 iOS 工程在同一个仓库中独立构建。
 

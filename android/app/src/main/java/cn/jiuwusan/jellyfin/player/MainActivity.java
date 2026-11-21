@@ -171,7 +171,7 @@ public final class MainActivity extends Activity {
         row.setBackgroundColor(LibraryUi.PANEL);
         root.addView(row, new LinearLayout.LayoutParams(-1, dp(61)));
         if (back != null) toolbarButton(row, "‹", "返回", back);
-        boolean home = "Jellyfin".equals(title) && back == null;
+        boolean home = getString(R.string.app_name).equals(title) && back == null;
         if (home) {
             LinearLayout.LayoutParams logoBounds = new LinearLayout.LayoutParams(dp(38), dp(38));
             logoBounds.setMarginStart(-dp(5));
@@ -436,7 +436,7 @@ public final class MainActivity extends Activity {
     private void homePage() {
         stopPlayback();
         browseTab = BrowseTab.HOME;
-        LinearLayout view = panel("Jellyfin", true, null, browseTab);
+        LinearLayout view = panel(getString(R.string.app_name), true, null, browseTab);
         view.setPadding(0, dp(19), 0, dp(30));
         for (HomeShelf shelf : HomeShelf.values()) {
             LinearLayout group = column();

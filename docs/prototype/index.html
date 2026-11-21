@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Jellyfin 家庭影音 · UI 设计</title>
+<title>z-jellyfin · UI 设计</title>
 <link rel="icon" href="app-icon.png">
 <link rel="stylesheet" href="ui.css">
 </head>
@@ -12,7 +12,7 @@
  <aside class="notes" aria-label="原型导航">
   <div class="reviewIdentity">
    <img src="logo.png" alt="" width="68" height="68">
-   <h1>Jellyfin<span>家庭影音</span></h1>
+   <h1>z-jellyfin<span>家庭影音</span></h1>
   </div>
   <nav class="jumps" aria-label="直接查看页面">
    <button class="jump" data-jump="home">首页 <span aria-hidden="true">↗</span></button>
@@ -23,7 +23,7 @@
    <button class="jump" data-jump="splash">开屏 <span aria-hidden="true">↗</span></button>
   </nav>
  </aside>
- <div class="shell" aria-label="Jellyfin 手机界面">
+ <div class="shell" aria-label="z-jellyfin 手机界面">
   <header class="top"></header>
   <main></main>
   <nav class="bottom" aria-label="主导航"></nav>
@@ -196,13 +196,13 @@ function player(){
 function splash(){
  return '<button class="splashStage" data-tab="home" type="button" aria-label="结束开屏预览并进入首页">'+
  '<span class="splashIdentity"><img src="logo.png" width="140" height="140" alt="">'+
- '<strong>Jellyfin</strong><span>家庭影音</span></span></button>';
+ '<strong>z-jellyfin</strong><span>家庭影音</span></span></button>';
 }
 function render(){
  const {page}=current, onHome=page==="home";
  document.querySelector(".shell").dataset.screen=page;
  main.dataset.screen=page;
- top.innerHTML=page==="splash"?"":'<div class="brand">'+(onHome?logo+'Jellyfin':'<button class="icon" data-back aria-label="返回">‹</button><span class="toplabel">'+esc(kind[page])+'</span>')+'</div>'+
+ top.innerHTML=page==="splash"?"":'<div class="brand">'+(onHome?logo+'z-jellyfin':'<button class="icon" data-back aria-label="返回">‹</button><span class="toplabel">'+esc(kind[page])+'</span>')+'</div>'+
  (page!=="player"&&page!=="settings"?'<div class="tools">'+(page==="search"?"":'<button class="icon search" data-go="search" aria-label="搜索"></button>')+'<button class="icon" data-go="settings" aria-label="连接设置">⚙</button></div>':"");
  const tabs=["home","library","settings"];
  const tab=tabs.includes(page)?page:stack.findLast(entry=>tabs.includes(entry.page))?.page||"home";
