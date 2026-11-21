@@ -1,0 +1,190 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		620000000000000000000001 /* JellyfinPlayerApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 620000000000000000000011 /* JellyfinPlayerApp.swift */; };
+		620000000000000000000002 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 620000000000000000000012 /* HomeView.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		620000000000000000000011 /* JellyfinPlayerApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JellyfinPlayerApp.swift; sourceTree = "<group>"; };
+		620000000000000000000012 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
+		620000000000000000000013 /* JellyfinPlayer.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = JellyfinPlayer.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		620000000000000000000031 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = ();
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		620000000000000000000021 = {
+			isa = PBXGroup;
+			children = (
+				620000000000000000000022 /* JellyfinPlayer */,
+				620000000000000000000023 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		620000000000000000000022 /* JellyfinPlayer */ = {
+			isa = PBXGroup;
+			children = (
+				620000000000000000000011 /* JellyfinPlayerApp.swift */,
+				620000000000000000000012 /* HomeView.swift */,
+			);
+			path = JellyfinPlayer;
+			sourceTree = "<group>";
+		};
+		620000000000000000000023 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				620000000000000000000013 /* JellyfinPlayer.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		620000000000000000000041 /* JellyfinPlayer */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 620000000000000000000052 /* Build configuration list for PBXNativeTarget "JellyfinPlayer" */;
+			buildPhases = (
+				620000000000000000000032 /* Sources */,
+				620000000000000000000031 /* Frameworks */,
+			);
+			buildRules = ();
+			dependencies = ();
+			name = JellyfinPlayer;
+			productName = JellyfinPlayer;
+			productReference = 620000000000000000000013 /* JellyfinPlayer.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		620000000000000000000042 /* Project object */ = {
+			isa = PBXProject;
+			attributes = { LastUpgradeCheck = 1600; };
+			buildConfigurationList = 620000000000000000000051 /* Build configuration list for PBXProject "JellyfinPlayer" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = "zh-Hans";
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				"zh-Hans",
+				en,
+				Base,
+			);
+			mainGroup = 620000000000000000000021;
+			productRefGroup = 620000000000000000000023 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				620000000000000000000041 /* JellyfinPlayer */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		620000000000000000000032 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				620000000000000000000001 /* JellyfinPlayerApp.swift in Sources */,
+				620000000000000000000002 /* HomeView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		620000000000000000000061 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				ENABLE_TESTABILITY = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		620000000000000000000062 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Release;
+		};
+		620000000000000000000063 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Jellyfin 家庭影音";
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = cn.jiuwusan.jellyfin.player;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		620000000000000000000064 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Jellyfin 家庭影音";
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = cn.jiuwusan.jellyfin.player;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		620000000000000000000051 /* Build configuration list for PBXProject "JellyfinPlayer" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				620000000000000000000061 /* Debug */,
+				620000000000000000000062 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		620000000000000000000052 /* Build configuration list for PBXNativeTarget "JellyfinPlayer" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				620000000000000000000063 /* Debug */,
+				620000000000000000000064 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+	};
+	rootObject = 620000000000000000000042 /* Project object */;
+}

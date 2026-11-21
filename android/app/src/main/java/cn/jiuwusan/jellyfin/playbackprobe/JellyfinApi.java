@@ -1,0 +1,276 @@
+package cn.jiuwusan.jellyfin.playbackprobe;
+
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.util.Log;
+import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.net.Proxy;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.TimeUnit;
+import okhttp3.Credentials;
+import okhttp3.HttpUrl;
+import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+final class JellyfinApi {
+    static final String TAG = "JellyfinProbe";
+    private final ConnectionSettings settings;
+    private final OkHttpClient http;
+    private final String device;
+    private String token;
+    private String userId;
+
+    JellyfinApi(ConnectionSettings settings, String device) {
+        this.settings = settings;
+        this.device = device;
+        Proxy proxy = new Proxy(Proxy.Type.HTTP, InetSocketAddress.createUnresolved(settings.host, settings.port));
+        String proxyAuth = settings.proxyUser.isEmpty() ? null :
+                Credentials.basic(settings.proxyUser, settings.proxyPassword, StandardCharsets.UTF_8);
+        http = new OkHttpClient.Builder().proxy(proxy).followRedirects(false).followSslRedirects(false)
+                .connectTimeout(10, TimeUnit.SECONDS).readTimeout(45, TimeUnit.SECONDS)
+                .proxyAuthenticator((route, response) -> {
+                    if (proxyAuth == null || response.request().header("Proxy-Authorization") != null) return null;
+                    return response.request().newBuilder().header("Proxy-Authorization", proxyAuth).build();
+                })
+                .addInterceptor(chain -> {
+                    Request request = chain.request();
+                    if (!sameServer(request.url())) throw new IOException("媒体地址不属于当前 Jellyfin 服务器");
+                    if ("http".equals(request.url().scheme()) && proxyAuth != null) {
+                        request = request.newBuilder().header("Proxy-Authorization", proxyAuth).build();
+                    }
+                    return chain.proceed(request);
+                }).build();
+    }
+
+    void login() throws Exception {
+        JSONObject login = json("登录", url("Users/AuthenticateByName").build(),
+                new JSONObject().put("Username", settings.user).put("Pw", settings.password));
+        token = login.getString("AccessToken");
+        userId = login.getJSONObject("User").getString("Id");
+        Log.i(TAG, "Login successful");
+    }
+
+    List<Item> search(String query) throws Exception {
+        JSONArray items = json("搜索", url("Items").addQueryParameter("userId", userId)
+                .addQueryParameter("Recursive", "true").addQueryParameter("IncludeItemTypes", "Movie,Episode,Video,Series")
+                .addQueryParameter("SearchTerm", query).addQueryParameter("Limit", "30").build(), null).getJSONArray("Items");
+        return entries(items);
+    }
+
+    List<Item> libraries() throws Exception {
+        return entries(json("读取媒体库", url("UserViews").addQueryParameter("userId", userId)
+                .build(), null).getJSONArray("Items"));
+    }
+
+    List<Item> resumeItems() throws Exception {
+        return entries(json("读取继续观看", url("Users/" + userId + "/Items/Resume")
+                .addQueryParameter("MediaTypes", "Video").addQueryParameter("Limit", "12")
+                .addQueryParameter("EnableUserData", "true").build(), null).getJSONArray("Items"));
+    }
+
+    List<Item> children(Item parent, int offset) throws Exception {
+        return entries(json("读取媒体库", url("Items").addQueryParameter("userId", userId)
+                .addQueryParameter("ParentId", parent.id).addQueryParameter("SortBy", "SortName")
+                .addQueryParameter("StartIndex", Integer.toString(offset))
+                .addQueryParameter("Limit", "36").build(), null).getJSONArray("Items"));
+    }
+
+    Item details(Item item) throws Exception {
+        return new Item(json("读取影片详情", url("Items/" + item.id)
+                .addQueryParameter("userId", userId).build(), null));
+    }
+
+    Bitmap poster(Item item) throws IOException {
+        if (!item.hasPoster) return null;
+        Request request = new Request.Builder().url(url("Items/" + item.id + "/Images/Primary")
+                .addQueryParameter("maxWidth", "420").addQueryParameter("quality", "80").build())
+                .header("Authorization", authorization()).build();
+        try (Response response = http.newCall(request).execute()) {
+            return response.isSuccessful() && response.body() != null
+                    ? BitmapFactory.decodeStream(response.body().byteStream()) : null;
+        }
+    }
+
+    List<Item> episodes(Item show) throws Exception {
+        JSONArray items = json("读取剧集", url("Shows/" + show.id + "/Episodes")
+                .addQueryParameter("userId", userId).addQueryParameter("Limit", "100").build(), null).getJSONArray("Items");
+        return entries(items);
+    }
+
+    private static List<Item> entries(JSONArray items) throws Exception {
+        List<Item> results = new ArrayList<>();
+        for (int i = 0; i < items.length(); i++) {
+            results.add(new Item(items.getJSONObject(i)));
+        }
+        return results;
+    }
+
+    Stream stream(Item item) throws Exception {
+        JSONObject initial = playbackInfo(item, null, false);
+        JSONArray sources = initial.optJSONArray("MediaSources");
+        if (sources == null || sources.length() == 0) throw new IOException("没有可用片源");
+        JSONObject source = sources.getJSONObject(0);
+        String sourceId = source.getString("Id");
+        JSONObject video = firstVideo(source);
+        int width = video.optInt("Width");
+        int height = video.optInt("Height");
+        boolean constrained = PlaybackPolicy.needsResize(width, height);
+        JSONObject info = constrained ? playbackInfo(item, sourceId, true) : initial;
+        if (constrained) {
+            source = findSource(info, sourceId);
+        }
+        String session = info.getString("PlaySessionId");
+        HttpUrl streamUrl;
+        boolean hls = constrained || !source.optBoolean("SupportsDirectPlay") && !source.optBoolean("SupportsDirectStream");
+        if (hls) {
+            String path = source.optString("TranscodingUrl");
+            if (path.isEmpty() || !source.optBoolean("SupportsTranscoding")) throw new IOException("服务端没有提供转码流");
+            // A server with a base path may return a relative API path or an absolute path.
+            HttpUrl resolved = path.startsWith("/") && !path.startsWith("//")
+                    && !path.startsWith(settings.server.encodedPath()) ? settings.server.resolve(path.substring(1))
+                    : settings.server.resolve(path);
+            if (resolved == null || !sameServer(resolved) || !resolved.encodedPath().endsWith(".m3u8")) {
+                throw new IOException("服务端没有提供可用的 HLS 地址");
+            }
+            HttpUrl.Builder request = resolved.newBuilder();
+            if (constrained) {
+                request.removeAllQueryParameters("Width").removeAllQueryParameters("Height")
+                        .setQueryParameter("MaxWidth", Integer.toString(PlaybackPolicy.WIDTH))
+                        .setQueryParameter("MaxHeight", Integer.toString(PlaybackPolicy.HEIGHT))
+                        .setQueryParameter("VideoBitRate", Integer.toString(PlaybackPolicy.VIDEO_BPS))
+                        .setQueryParameter("AudioBitRate", Integer.toString(PlaybackPolicy.AUDIO_BPS))
+                        .setQueryParameter("VideoCodec", "h264").setQueryParameter("AudioCodec", "aac")
+                        .setQueryParameter("MaxFramerate", "60").setQueryParameter("MaxVideoBitDepth", "8")
+                        .setQueryParameter("AllowVideoStreamCopy", "false")
+                        .setQueryParameter("AllowAudioStreamCopy", "false")
+                        .setQueryParameter("EnableAutoStreamCopy", "false");
+            }
+            streamUrl = request.build();
+        } else {
+            streamUrl = url("Videos/" + item.id + "/stream")
+                    .addQueryParameter("Static", Boolean.toString(source.optBoolean("SupportsDirectPlay")))
+                    .addQueryParameter("MediaSourceId", sourceId).addQueryParameter("PlaySessionId", session)
+                    .addQueryParameter("DeviceId", device).build();
+        }
+        Log.i(TAG, "Playback source=" + width + "x" + height + " constrained=" + constrained
+                + " HLS=" + hls + (constrained ? " videoBudget=3808000 audioBudget=192000" : ""));
+        return new Stream(item.id, sourceId, session, streamUrl, hls, constrained);
+    }
+
+    void report(Stream stream, String event, long positionMs, boolean paused) throws Exception {
+        String route = event.isEmpty() ? "Sessions/Playing" : "Sessions/Playing/" + event;
+        JSONObject body = new JSONObject().put("ItemId", stream.itemId).put("MediaSourceId", stream.sourceId)
+                .put("PlaySessionId", stream.session).put("PositionTicks", Math.max(0, positionMs) * 10_000)
+                .put("IsPaused", paused).put("CanSeek", true)
+                .put("PlayMethod", stream.hls ? "Transcode" : "DirectPlay");
+        json("播放状态", url(route).build(), body);
+    }
+
+    private static JSONObject firstVideo(JSONObject source) throws Exception {
+        JSONArray streams = source.optJSONArray("MediaStreams");
+        for (int i = 0; streams != null && i < streams.length(); i++) {
+            JSONObject stream = streams.getJSONObject(i);
+            if ("Video".equals(stream.optString("Type"))) return stream;
+        }
+        return new JSONObject();
+    }
+
+    private static JSONObject findSource(JSONObject info, String id) throws Exception {
+        JSONArray sources = info.getJSONArray("MediaSources");
+        for (int i = 0; i < sources.length(); i++) {
+            JSONObject source = sources.getJSONObject(i);
+            if (id.equals(source.optString("Id"))) return source;
+        }
+        throw new IOException("服务端未为选中的片源返回转码信息");
+    }
+
+    private JSONObject playbackInfo(Item item, String source, boolean constrained) throws Exception {
+        JSONObject body = new JSONObject().put("UserId", userId).put("DeviceProfile", profile());
+        if (constrained) {
+            body.put("MediaSourceId", source).put("MaxStreamingBitrate", PlaybackPolicy.TOTAL_BPS)
+                    .put("EnableDirectPlay", false).put("EnableDirectStream", false)
+                    .put("EnableTranscoding", true).put("AllowVideoStreamCopy", false).put("AllowAudioStreamCopy", false);
+        }
+        return json("播放协商", url("Items/" + item.id + "/PlaybackInfo").build(), body);
+    }
+
+    private static JSONObject profile() throws Exception {
+        JSONObject direct = new JSONObject().put("Type", "Video").put("Container", "mp4,mkv")
+                .put("VideoCodec", "h264,hevc").put("AudioCodec", "aac,mp3,ac3,eac3,opus");
+        JSONObject transcode = new JSONObject().put("Type", "Video").put("Context", "Streaming")
+                .put("Protocol", "hls").put("Container", "ts").put("VideoCodec", "h264").put("AudioCodec", "aac");
+        return new JSONObject().put("Name", "Jellyfin Playback Probe")
+                .put("MaxStreamingBitrate", 120_000_000).put("MaxStaticBitrate", 120_000_000)
+                .put("DirectPlayProfiles", new JSONArray().put(direct))
+                .put("TranscodingProfiles", new JSONArray().put(transcode));
+    }
+
+    OkHttpClient client() { return http; }
+
+    String authorization() {
+        return "MediaBrowser Client=\"Jellyfin Playback Probe\", Device=\"Android\", DeviceId=\"" + device
+                + "\", Version=\"0.2.0\"" + (token == null ? "" : ", Token=\"" + token + "\"");
+    }
+
+    private HttpUrl.Builder url(String path) { return settings.server.newBuilder().addPathSegments(path); }
+
+    private boolean sameServer(HttpUrl url) {
+        return url.scheme().equals(settings.server.scheme()) && url.host().equals(settings.server.host())
+                && url.port() == settings.server.port() && url.encodedPath().startsWith(settings.server.encodedPath());
+    }
+
+    private JSONObject json(String operation, HttpUrl url, JSONObject body) throws Exception {
+        Request.Builder request = new Request.Builder().url(url).header("Authorization", authorization())
+                .header("Accept", "application/json");
+        if (body != null) request.post(RequestBody.create(body.toString(), MediaType.get("application/json")));
+        try (Response response = http.newCall(request.build()).execute()) {
+            if (!response.isSuccessful()) throw new IOException(operation + "失败，HTTP " + response.code());
+            String text = response.body() == null ? "" : response.body().string();
+            return text.isEmpty() ? new JSONObject() : new JSONObject(text);
+        }
+    }
+
+    static final class Item {
+        final String id, title, seriesName, overview, type;
+        final boolean series, folder, hasPoster;
+        final long durationMs, resumeMs;
+        final int year;
+
+        Item(JSONObject entry) throws Exception {
+            id = entry.getString("Id");
+            type = entry.optString("Type");
+            String name = entry.getString("Name");
+            title = "Episode".equals(type) && entry.has("IndexNumber")
+                    ? "第 " + entry.optInt("IndexNumber") + " 集 · " + name : name;
+            series = "Series".equals(type);
+            folder = entry.optBoolean("IsFolder") || "CollectionFolder".equals(type) || "UserView".equals(type);
+            seriesName = entry.optString("SeriesName", "");
+            overview = entry.optString("Overview", "");
+            year = entry.optInt("ProductionYear");
+            durationMs = Math.max(0, entry.optLong("RunTimeTicks")) / 10_000;
+            JSONObject data = entry.optJSONObject("UserData");
+            long position = data == null || data.optBoolean("Played") ? 0 : data.optLong("PlaybackPositionTicks");
+            resumeMs = Math.max(0, position) / 10_000;
+            JSONObject tags = entry.optJSONObject("ImageTags");
+            hasPoster = tags != null && tags.has("Primary");
+        }
+    }
+
+    static final class Stream {
+        final String itemId, sourceId, session;
+        final HttpUrl url;
+        final boolean hls, constrained;
+        Stream(String itemId, String sourceId, String session, HttpUrl url, boolean hls, boolean constrained) {
+            this.itemId = itemId; this.sourceId = sourceId; this.session = session;
+            this.url = url; this.hls = hls; this.constrained = constrained;
+        }
+    }
+}
