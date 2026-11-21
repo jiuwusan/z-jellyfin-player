@@ -135,7 +135,7 @@ function card(id,mode="poster"){
  const i=catalog[id], resume=mode==="resume", episode=Boolean(i.parent);
  const landscape=resume||mode==="next-up";
  const name=episode?parentName(i):i.name;
- const detail=episode?epLabel(i)+(resume?"":" · "+i.name):i.type+" · "+i.year;
+ const detail=episode?epLabel(i)+(landscape?"":" · "+i.name):i.type+" · "+i.year;
  const watchTime=resume?time(records[id])+" / "+time(i.length):"";
  const coverInfo=resume?'<span class="resumeShade" aria-hidden="true"></span>'+
  '<span class="watchTime">'+watchTime+'</span>'+progress(id)+

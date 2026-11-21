@@ -148,7 +148,7 @@ final class LibraryUi {
     private View card(JellyfinApi.Item item, boolean wide, boolean progress, int width, Runnable action) {
         int radius = progress ? RADIUS_PANEL : RADIUS_CONTROL;
         LinearLayout tile = column();
-        FrameLayout cover = picture(item, wide, progress ? 0 : radius);
+        FrameLayout cover = picture(item, wide, progress ? 0 : radius, wide);
         int imageWidth = width;
         if (progress) {
             GradientDrawable surface = rounded(SURFACE, radius);
@@ -179,12 +179,12 @@ final class LibraryUi {
         copy.addView(title);
         String episode = (item.season > 0 ? "第 " + item.season + " 季" : "")
                 + (item.index > 0 ? (item.season > 0 ? " · " : "") + "第 " + item.index + " 集" : "");
-        String episodeTitle = episodeTitle(item);
+        String episodeTitle = wide ? "" : episodeTitle(item);
         String itemType = item.series ? "剧集" : "Movie".equals(item.type) ? "电影" : "";
         String year = item.year > 0 ? Integer.toString(item.year) : "";
         String subtitle = item.seriesName.isEmpty()
                 ? itemType.isEmpty() ? year : year.isEmpty() ? itemType : itemType + " · " + year
-                : progress || episodeTitle.isEmpty() ? episode
+                : episodeTitle.isEmpty() ? episode
                 : episode.isEmpty() ? episodeTitle : episode + " · " + episodeTitle;
         if (!subtitle.isEmpty()) {
             TextView info = label(subtitle, 12, MUTED, false);
@@ -224,10 +224,10 @@ final class LibraryUi {
     }
 
     FrameLayout picture(JellyfinApi.Item item, boolean wide) {
-        return picture(item, wide, RADIUS_SMALL);
+        return picture(item, wide, RADIUS_SMALL, false);
     }
 
-    private FrameLayout picture(JellyfinApi.Item item, boolean wide, int radius) {
+    private FrameLayout picture(JellyfinApi.Item item, boolean wide, int radius, boolean preferSeriesBackdrop) {
         FrameLayout cover = new FrameLayout(context);
         cover.setBackground(rounded(PANEL, radius));
         cover.setClipToOutline(true);
@@ -240,18 +240,20 @@ final class LibraryUi {
         image.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         cover.addView(image, new FrameLayout.LayoutParams(-1, -1));
         JellyfinApi client = connection;
+        String seriesBackdropId = preferSeriesBackdrop ? item.seriesBackdropId : "";
         if (client != null && (item.hasPoster || item.hasBackdrop && wide || !item.seriesId.isEmpty())) {
             String key = item.id + (wide ? ":wide" : ":portrait");
-            Bitmap hit = cache.get(key);
+            String cacheKey = seriesBackdropId.isEmpty() ? key : key + ":series-backdrop:" + seriesBackdropId;
+            Bitmap hit = cache.get(cacheKey);
             if (hit != null) {
                 image.setImageBitmap(hit);
             } else {
                 images.execute(() -> {
                     try {
-                        Bitmap bitmap = client.artwork(item, wide);
+                        Bitmap bitmap = client.artwork(item, wide, seriesBackdropId);
                         if (bitmap != null) main.post(() -> {
                             if (connection != client) return;
-                            cache.put(key, bitmap);
+                            cache.put(cacheKey, bitmap);
                             image.setImageBitmap(bitmap);
                         });
                     } catch (IOException ignored) {
@@ -264,7 +266,7 @@ final class LibraryUi {
     }
 
     FrameLayout hero(JellyfinApi.Item item) {
-        FrameLayout cover = picture(item, true, 0);
+        FrameLayout cover = picture(item, true, 0, false);
         cover.setForeground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
                 new int[] { 0x00101010, 0x40101010, BACKGROUND }));
         return cover;

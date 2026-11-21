@@ -124,7 +124,15 @@ final class JellyfinApi {
                 .addQueryParameter("userId", userId).build(), null));
     }
 
-    Bitmap artwork(Item item, boolean wide) throws IOException {
+    Bitmap artwork(Item item, boolean wide, String seriesBackdropId) throws IOException {
+        if (!seriesBackdropId.isEmpty()) {
+            try {
+                Bitmap backdrop = image(seriesBackdropId, "Backdrop/0", 640);
+                if (backdrop != null) return backdrop;
+            } catch (IOException ignored) {
+                // The episode's own artwork may still be available.
+            }
+        }
         if (wide && item.hasBackdrop) {
             Bitmap backdrop = image(item.id, "Backdrop/0", 640);
             if (backdrop != null) return backdrop;
@@ -398,7 +406,7 @@ final class JellyfinApi {
     }
 
     static final class Item {
-        final String id, title, seriesName, seriesId, overview, type, collectionType;
+        final String id, title, seriesName, seriesId, seriesBackdropId, overview, type, collectionType;
         final boolean series, folder, hasPoster, hasBackdrop, played;
         final long durationMs, resumeMs;
         final int year, index, season;
@@ -426,6 +434,11 @@ final class JellyfinApi {
             hasPoster = tags != null && tags.has("Primary");
             JSONArray backdrops = entry.optJSONArray("BackdropImageTags");
             hasBackdrop = backdrops != null && backdrops.length() > 0;
+            JSONArray parentBackdrops = entry.optJSONArray("ParentBackdropImageTags");
+            String parentBackdropId = entry.optString("ParentBackdropItemId", "");
+            seriesBackdropId = "Episode".equals(type) && !seriesId.isEmpty()
+                    && seriesId.equalsIgnoreCase(parentBackdropId)
+                    && parentBackdrops != null && parentBackdrops.length() > 0 ? seriesId : "";
         }
     }
 
