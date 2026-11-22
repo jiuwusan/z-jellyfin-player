@@ -39,6 +39,7 @@ import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 import androidx.media3.common.C;
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 import androidx.media3.common.Format;
 import androidx.media3.common.MimeTypes;
 import androidx.media3.common.PlaybackException;
@@ -626,6 +627,7 @@ public final class MainActivity extends Activity {
     private final class LibraryListing {
         private final LinearLayout view;
         private final ScrollView scroll;
+        private final SwipeRefreshLayout refresh;
         private final LinearLayout grid = column();
         private final LinearLayout footer = column();
         private final LibraryLocation location;
@@ -638,6 +640,17 @@ public final class MainActivity extends Activity {
         LibraryListing(LinearLayout view, LibraryLocation location, Runnable reopen) {
             this.view = view;
             this.scroll = (ScrollView) view.getParent();
+            LinearLayout root = (LinearLayout) scroll.getParent();
+            int index = root.indexOfChild(scroll);
+            android.view.ViewGroup.LayoutParams bounds = scroll.getLayoutParams();
+            root.removeView(scroll);
+            refresh = new SwipeRefreshLayout(MainActivity.this);
+            refresh.setColorSchemeColors(LibraryUi.ACCENT_LIGHT);
+            refresh.setProgressBackgroundColorSchemeColor(LibraryUi.PANEL);
+            refresh.addView(scroll, new android.view.ViewGroup.LayoutParams(-1, -1));
+            root.addView(refresh, index, bounds);
+            refresh.setOnChildScrollUpCallback((parent, child) -> loading || scroll.canScrollVertically(-1));
+            refresh.setOnRefreshListener(() -> load(true));
             this.location = location;
             this.reopen = reopen;
         }
@@ -679,32 +692,45 @@ public final class MainActivity extends Activity {
         }
 
         private void load() {
-            if (page != expected || loading || !location.more) return;
+            load(false);
+        }
+
+        private void load(boolean replace) {
+            if (page != expected || loading || !replace && !location.more) return;
             loading = true;
             failed = false;
-            int offset = location.items.size();
+            int offset = replace ? 0 : location.items.size();
             footer.removeAllViews();
-            TextView status = text(footer, offset == 0 ? "正在加载…" : "正在加载更多…");
+            TextView status = text(footer, replace ? "正在刷新…" : offset == 0 ? "正在加载…" : "正在加载更多…");
+            if (replace) refresh.setRefreshing(true);
             status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
             JellyfinApi connection = api;
             browse.execute(() -> {
                 try {
                     JellyfinApi.LibraryItemsPage next = connection.libraryItems(location.folder, location.catalog, offset);
                     onPage(expected, () -> {
+                        if (replace) {
+                            location.items.clear();
+                            location.scrollY = 0;
+                            grid.removeAllViews();
+                            scroll.scrollTo(0, 0);
+                        }
                         location.items.addAll(next.items);
                         location.loaded = true;
                         location.more = next.more;
                         appendItems(offset);
                         loading = false;
+                        refresh.setRefreshing(false);
                         Log.i(JellyfinApi.TAG, "Library page offset=" + offset + " items=" + next.items.size()
-                                + " more=" + next.more);
+                                + " more=" + next.more + " refresh=" + replace);
                     });
                 } catch (Exception error) {
                     onPage(expected, () -> {
                         loading = false;
+                        refresh.setRefreshing(false);
                         failed = true;
-                        status.setText(message(error, offset == 0 ? "读取媒体库失败" : "读取下一页失败"));
-                        button(footer, "重试", this::load);
+                        status.setText(message(error, replace ? "刷新媒体库失败" : offset == 0 ? "读取媒体库失败" : "读取下一页失败"));
+                        button(footer, "重试", () -> load(replace));
                     });
                 }
             });

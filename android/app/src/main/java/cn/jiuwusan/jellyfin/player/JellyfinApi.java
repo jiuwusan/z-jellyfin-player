@@ -93,13 +93,17 @@ final class JellyfinApi {
 
     LibraryItemsPage libraryItems(Item parent, boolean catalog, int offset) throws Exception {
         HttpUrl.Builder request = url("Items").addQueryParameter("userId", userId)
-                .addQueryParameter("SortBy", "SortName")
+                .addQueryParameter("SortBy", "DateCreated,SortName")
+                .addQueryParameter("SortOrder", "Descending,Ascending")
                 .addQueryParameter("StartIndex", Integer.toString(offset))
                 .addQueryParameter("Limit", Integer.toString(LIBRARY_PAGE_SIZE));
         if (parent != null) request.addQueryParameter("ParentId", parent.id);
         if (catalog) {
+            String types = parent == null ? "Movie,Series"
+                    : "tvshows".equals(parent.collectionType) ? "Series"
+                    : "movies".equals(parent.collectionType) ? "Movie" : "Movie,Series,Video";
             request.addQueryParameter("Recursive", "true")
-                    .addQueryParameter("IncludeItemTypes", parent == null ? "Movie,Series" : "Movie,Series,Video");
+                    .addQueryParameter("IncludeItemTypes", types);
         }
         JSONObject result = json("读取媒体库", request.build(), null);
         List<Item> items = entries(result.getJSONArray("Items"));
