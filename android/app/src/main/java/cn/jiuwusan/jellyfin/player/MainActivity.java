@@ -477,53 +477,90 @@ public final class MainActivity extends Activity {
         browseTab = BrowseTab.HOME;
         LinearLayout view = panel(getString(R.string.app_name), true, null, browseTab);
         view.setPadding(contentGutter(), dp(22), contentGutter(), dp(32));
-        fillHome(view);
+        new HomeListing(view).load(false);
     }
 
-    private void fillHome(LinearLayout view) {
-        int expected = page;
-        TextView state = text(view, "正在加载…");
-        JellyfinApi connection = api;
-        browse.execute(() -> {
-            try {
-                HomeFeed.Result<JellyfinApi.Item> result = HomeFeed.load(new HomeFeed.Source<JellyfinApi.Item>() {
-                    @Override public List<JellyfinApi.Item> resume() throws Exception {
-                        List<JellyfinApi.Item> items = connection.resumeItems();
-                        for (java.util.Iterator<JellyfinApi.Item> it = items.iterator(); it.hasNext();) {
-                            JellyfinApi.Item item = it.next();
-                            if (item.resumeMs <= 0 || item.played
-                                    || item.durationMs > 0 && item.resumeMs >= item.durationMs) it.remove();
+    private final class HomeListing {
+        private final LinearLayout view;
+        private final ScrollView scroll;
+        private final SwipeRefreshLayout refresh;
+        private final int expected = page;
+        private boolean loading, loaded;
+
+        HomeListing(LinearLayout view) {
+            this.view = view;
+            scroll = (ScrollView) view.getParent();
+            LinearLayout root = (LinearLayout) scroll.getParent();
+            int index = root.indexOfChild(scroll);
+            android.view.ViewGroup.LayoutParams bounds = scroll.getLayoutParams();
+            root.removeView(scroll);
+            refresh = new SwipeRefreshLayout(MainActivity.this);
+            refresh.setId(R.id.home_refresh);
+            refresh.setColorSchemeColors(LibraryUi.ACCENT_LIGHT);
+            refresh.setProgressBackgroundColorSchemeColor(LibraryUi.PANEL);
+            refresh.addView(scroll, new android.view.ViewGroup.LayoutParams(-1, -1));
+            root.addView(refresh, index, bounds);
+            refresh.setOnChildScrollUpCallback((parent, child) ->
+                    loading || homePlayLoading || scroll.canScrollVertically(-1));
+            refresh.setOnRefreshListener(() -> load(true));
+        }
+
+        void load(boolean requestedRefresh) {
+            if (page != expected || loading) return;
+            loading = true;
+            if (!loaded) view.removeAllViews();
+            TextView state = loaded ? null : text(view, "正在加载…");
+            if (requestedRefresh) refresh.setRefreshing(true);
+            JellyfinApi connection = api;
+            browse.execute(() -> {
+                try {
+                    HomeFeed.Result<JellyfinApi.Item> result = HomeFeed.load(new HomeFeed.Source<JellyfinApi.Item>() {
+                        @Override public List<JellyfinApi.Item> resume() throws Exception {
+                            List<JellyfinApi.Item> items = connection.resumeItems();
+                            for (java.util.Iterator<JellyfinApi.Item> it = items.iterator(); it.hasNext();) {
+                                JellyfinApi.Item item = it.next();
+                                if (item.resumeMs <= 0 || item.played
+                                        || item.durationMs > 0 && item.resumeMs >= item.durationMs) it.remove();
+                            }
+                            return items;
                         }
-                        return items;
-                    }
-                    @Override public List<JellyfinApi.Item> latest() throws Exception {
-                        return recentItems(connection.latestItems());
-                    }
-                });
-                onPage(expected, () -> {
-                    view.removeAllViews();
-                    TextView heading = libraryUi.label(result.resume ? "继续观看" : "最近添加", 26, LibraryUi.TEXT, true);
-                    heading.setPadding(0, 0, 0, dp(16));
-                    view.addView(heading);
-                    if (result.items.isEmpty()) {
-                        text(view, "暂无可播放的影片。");
-                    } else {
-                        view.addView(libraryUi.homeList(result.items, result.resume, screenWidth(),
-                                item -> openHomeDetails(item), item -> playHomeItem(item)));
-                    }
-                    Log.i(JellyfinApi.TAG, "Home section=" + (result.resume ? "RESUME" : "LATEST")
-                            + " items=" + result.items.size());
-                });
-            } catch (Exception error) {
-                onPage(expected, () -> {
-                    state.setText(message(error, "读取首页失败"));
-                    button(view, "重试", () -> {
-                        view.removeAllViews();
-                        fillHome(view);
+                        @Override public List<JellyfinApi.Item> latest() throws Exception {
+                            return recentItems(connection.latestItems());
+                        }
                     });
-                });
-            }
-        });
+                    onPage(expected, () -> {
+                        view.removeAllViews();
+                        TextView heading = libraryUi.label(result.resume ? "继续观看" : "最近添加", 26, LibraryUi.TEXT, true);
+                        heading.setPadding(0, 0, 0, dp(16));
+                        view.addView(heading);
+                        if (result.items.isEmpty()) {
+                            text(view, "暂无可播放的影片。");
+                        } else {
+                            view.addView(libraryUi.homeList(result.items, result.resume, screenWidth(),
+                                    item -> openHomeDetails(item), item -> playHomeItem(item)));
+                        }
+                        loaded = true;
+                        loading = false;
+                        refresh.setRefreshing(false);
+                        scroll.scrollTo(0, 0);
+                        Log.i(JellyfinApi.TAG, "Home section=" + (result.resume ? "RESUME" : "LATEST")
+                                + " items=" + result.items.size() + " refresh=" + requestedRefresh);
+                    });
+                } catch (Exception error) {
+                    onPage(expected, () -> {
+                        loading = false;
+                        refresh.setRefreshing(false);
+                        if (loaded) {
+                            android.widget.Toast.makeText(MainActivity.this,
+                                    message(error, "刷新首页失败，请下拉重试"), android.widget.Toast.LENGTH_LONG).show();
+                        } else {
+                            state.setText(message(error, "读取首页失败"));
+                            button(view, "重试", () -> load(false));
+                        }
+                    });
+                }
+            });
+        }
     }
 
     private void openHomeDetails(JellyfinApi.Item item) {
