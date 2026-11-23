@@ -1,0 +1,181 @@
+@import url("../ui.css");
+
+:root {
+  --bg: #101010;
+  --panel: #202020;
+  --sub: #d2d2d2;
+  --muted: #c2c2c2;
+  --line: #ffffff38;
+  --primary-light: #70d5f5;
+  --gutter: 20px;
+}
+
+body { font-size: 20px; line-height: 1.5; }
+.desktop { grid-template-columns: minmax(210px, 1fr) 426px; }
+.designIntro { color: #d2d2d2; font-size: 17px; line-height: 1.7; margin: 0 0 26px; }
+.notes h1 { font-size: 48px; }
+.notes h1 span { color: var(--primary-light); font-size: 26px; letter-spacing: 0; }
+.jump { min-height: 54px; font-size: 18px; }
+.shell { container-type: inline-size; }
+.top, .shell[data-screen="library"] .top {
+  height: 76px; flex-basis: 76px; padding-inline: var(--gutter);
+  background: var(--bg); border-bottom: 1px solid var(--line);
+}
+.brand { font-size: 24px; gap: 8px; min-width: 0; }
+.mark { width: 31px; height: 31px; flex-basis: 31px; margin-left: 0; }
+.toplabel, .shell[data-screen="library"] .toplabel { font-size: 24px; font-weight: 700; }
+.tools { gap: 4px; }
+.largeTool, .shell[data-screen="library"] .largeTool {
+  width: 52px; min-width: 52px; height: 60px; padding: 4px 0;
+  display: flex; flex-direction: column; justify-content: center; gap: 1px;
+  color: var(--text); background: transparent; border: 0;
+}
+.largeTool svg { width: 25px; height: 25px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.largeTool span { font-size: 16px; line-height: 24px; }
+main.pad { padding: 22px var(--gutter) 32px; }
+main.pad[data-screen="library"] { padding-top: 0; }
+h2 { font-size: 26px; line-height: 1.4; }
+.section { margin-bottom: 16px; }
+.group { margin-bottom: 30px; }
+.rail { gap: 14px; grid-auto-columns: calc((100cqw - 2 * var(--gutter) - 14px) / 2); }
+.rail.resume { grid-auto-columns: calc(100cqw - 2 * var(--gutter) - 16px); }
+.rail.next-up { grid-auto-columns: calc((100cqw - 2 * var(--gutter) - 14px) / 2); }
+.name { font-size: 22px; line-height: 1.45; margin-top: 9px; margin-bottom: 3px; }
+.sub { font-size: 17px; line-height: 1.55; }
+.resume .name { font-size: 24px; }
+.resume .cardCopy { padding: 12px 14px 15px; gap: 3px; }
+.resume .name, .next-up .name { display: block; white-space: normal; overflow-wrap: anywhere; }
+.resume .name {
+  display: block; height: 1.45em; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.cardYear { font-size: 20px; font-weight: 400; color: var(--sub); white-space: nowrap; }
+.resumeType {
+  position: absolute; top: 12px; inset-inline-end: 12px; padding: 3px 9px;
+  border-radius: var(--radius-small); background: #0009; color: #fff;
+  font-size: 18px; font-weight: 500; line-height: 1.5; pointer-events: none;
+}
+.resumeEpisode {
+  position: absolute; inset-inline-start: 12px; bottom: 54px;
+  color: #fff; font-size: 20px; font-weight: 500; line-height: 1.5;
+  white-space: nowrap; text-shadow: 0 1px 4px #000; pointer-events: none;
+}
+.watchTime { font-size: 17px; line-height: 26px; bottom: 20px; left: 12px; text-shadow: 0 1px 4px #000; }
+.resumeShade { inset-block-start: 20%; background: linear-gradient(transparent, #030303ee); }
+.quickPlayIcon { width: 44px; height: 44px; bottom: 20px; right: 12px; background-color: #0009; }
+.progress { height: 6px; }
+.cover .progress { bottom: 9px; inset-inline: 12px; }
+.grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 26px 14px; }
+.filters { gap: 18px; margin-bottom: 16px; }
+.filters .chip { font-size: 20px; min-width: 56px; min-height: 58px; padding-inline: 3px; }
+.filters .chip[aria-pressed="true"] { background: transparent; font-weight: 750; }
+.filters .chip[aria-pressed="true"]::after { width: 28px; height: 3px; bottom: 5px; }
+.bottom { padding: 8px 12px max(9px, env(safe-area-inset-bottom)); gap: 8px; }
+.bottom button { min-height: 68px; font-size: 20px; gap: 3px; }
+.bottom span { width: 58px; height: 33px; }
+.bottom svg { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linejoin: round; stroke-linecap: round; }
+.bottom button[aria-current="page"] { font-weight: 750; }
+
+.heroCover { height: clamp(185px, 27svh, 228px); }
+.largeDetail { --detail-poster-width: clamp(94px, 27vw, 114px); }
+.detailIdentity { gap: 18px; }
+.detailPoster { margin-top: calc(-.88 * var(--detail-poster-width)); }
+.detailHeading { padding-block: 10px; }
+.detail h1 { font-size: 30px; line-height: 1.3; letter-spacing: 0; }
+.meta { font-size: 18px; line-height: 1.55; }
+.detail .actions { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; margin-top: 20px; }
+.detail .actions > :only-child { grid-column: 1 / -1; }
+.detailPlay { min-height: 56px; font-size: 21px; gap: 9px; padding-inline: 16px; }
+.detailPlay svg { width: 26px; height: 26px; }
+.detail .detailPlay { color: var(--primary-light); border-color: #70d5f580; background: #70d5f510; }
+.detail .secondary { min-height: 56px; font-size: 18px; padding-inline: 14px; }
+.summary { font-size: 20px; line-height: 1.75; margin-bottom: 25px; }
+.sheet { padding-top: 24px; }
+.chip { min-height: 56px; padding: 9px 16px; font-size: 20px; }
+.seasonTabs { gap: 12px; margin-top: 4px; margin-bottom: 14px; }
+.episode { gap: 14px; min-height: 110px; padding-block: 16px; }
+.episode .cover { width: 96px; flex-basis: 96px; }
+.episode .name { font-size: 21px; }
+.episode .sub { font-size: 17px; }
+.watched { font-size: 16px; padding: 5px 9px; }
+.watchprogress + small { font-size: 17px; }
+
+.settingsGroup { margin-bottom: 26px; padding-bottom: 26px; }
+.settingsGroup h2 { font-size: 26px; margin-bottom: 19px; }
+.field { font-size: 20px; line-height: 1.5; gap: 6px; margin-bottom: 20px; }
+.field input, .field select, .searchField { min-height: 58px; font-size: 22px; padding: 10px 12px; }
+.qualityFields { grid-template-columns: 1fr; gap: 20px; }
+.columns { grid-template-columns: minmax(0, 1fr) 100px; gap: 16px; align-items: start; }
+.helper, .empty { font-size: 17px; line-height: 1.65; }
+.primary, .secondary { min-height: 56px; font-size: 20px; }
+.confirmDialog { width: min(390px, calc(100vw - 32px)); padding: 24px; }
+.confirmDialog h2 { font-size: 26px; }
+.confirmDialog .actions { justify-content: stretch; }
+.confirmDialog .actions button { flex: 1; }
+.confirmError { font-size: 18px; }
+
+.playerHeader { gap: 16px; }
+.playerBack { width: 56px; height: 56px; flex-basis: 56px; }
+.playerHeading h2 { font-size: 26px; }
+.playerHeading p { font-size: 18px; margin-top: 4px; }
+.playerTools { gap: 12px; }
+.playerTools button { min-height: 56px; font-size: 20px; padding-inline: 17px; }
+.captionIcon { font-size: 12px; }
+.audioIcon { font-size: 24px; }
+.playerToolbar { grid-template-columns: 1fr 1fr; gap: 12px; }
+.transport { grid-area: 2 / 1 / 3 / 3; gap: 14px; }
+.transportButton { min-height: 56px; font-size: 20px; padding-inline: 16px; }
+.transportButton span { font-size: 18px; }
+.playerToggle { width: 66px; height: 66px; flex-basis: 66px; }
+.playerTime { font-size: 20px; }
+.playerQuality { font-size: 18px; }
+.playerBottom input { height: 42px; margin-bottom: 2px; }
+.playerBottom input::-webkit-slider-runnable-track { height: 6px; }
+.playerBottom input::-webkit-slider-thumb { width: 24px; height: 24px; margin-top: -9px; }
+.playerCaption { font-size: 28px; }
+.playerControls:not([hidden]) + .playerCaption { bottom: 170px; }
+.trackMenu { width: min(360px, calc(100% - 40px)); top: 92px; max-height: calc(100% - 112px); padding: 12px; }
+.trackHeader h3 { font-size: 24px; }
+.trackHeader button { height: 56px; flex-basis: 56px; }
+.trackOptions button { min-height: 64px; padding: 12px; }
+.trackOptions strong { font-size: 21px; }
+.trackOptions small { font-size: 17px; }
+.playerBuffering { font-size: 20px; }
+
+@media (max-width: 780px) {
+  .top, .shell[data-screen="library"] .top { height: calc(76px + env(safe-area-inset-top)); flex-basis: calc(76px + env(safe-area-inset-top)); }
+}
+@media (max-width: 355px) {
+  :root { --gutter: 16px; }
+  .top, .shell[data-screen="library"] .top { padding-inline: 12px; }
+  .brand { font-size: 22px; gap: 5px; }
+  .mark { width: 26px; height: 26px; flex-basis: 26px; }
+  .largeTool, .shell[data-screen="library"] .largeTool { min-width: 48px; width: 48px; }
+  .toplabel, .shell[data-screen="library"] .toplabel { font-size: 22px; }
+  .detail h1 { font-size: 27px; }
+  .columns { grid-template-columns: 1fr; }
+  .detail .actions { grid-template-columns: 1fr; }
+}
+@media (max-width: 560px) and (orientation: portrait) {
+  .playerTools button { font-size: 17px; padding-inline: 10px; }
+  .playerTools button span { display: inline; }
+  .transport { gap: 5px; }
+  .transportButton { font-size: 16px; padding-inline: 7px; }
+  .transportButton span { font-size: 15px; }
+  .playerHeading h2 { font-size: 22px; }
+  .playerHeading p { font-size: 16px; }
+}
+
+/* Fallback wide cards do not display watch progress. */
+.fallback .resumeEpisode { bottom: 22px; }
+
+/* Home uses a single vertical list; scrolling belongs to the page. */
+.homeStack { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; padding-block: 3px 5px; }
+.homeStack .card { cursor: pointer; }
+
+/* Home cards have sibling detail/play buttons, never nested interactive elements. */
+.homeCard { position: relative; }
+.homeCard .cover { isolation: auto; }
+.homeCardDetails { position: absolute; inset: 0; z-index: 2; background: transparent; border-radius: inherit; }
+.quickPlayHit { position: absolute; z-index: 3; bottom: 14px; right: 6px; width: 56px; height: 56px; display: grid; place-items: center; background: transparent; padding: 0; }
+.quickPlayHit .quickPlayIcon { position: static; width: 44px; height: 44px; }

@@ -32,7 +32,7 @@ final class FullscreenPlaybackView extends FrameLayout {
     private static final int CONTROL_BORDER = 0x42ffffff;
     private static final int LIGHT_TEXT = 0xffc9d8de;
     private static final int SELECTED_BACKGROUND = 0xff13333f;
-    private static final int CHOICE_HEIGHT = 49;
+    private static final int CHOICE_HEIGHT = 64;
     private static final long CONTROLS_TIMEOUT_MS = 5_000;
 
     private final LibraryUi style;
@@ -104,10 +104,10 @@ final class FullscreenPlaybackView extends FrameLayout {
 
         TextView back = control("‹", "返回", close);
         back.setTextSize(29);
-        header.addView(back, new LinearLayout.LayoutParams(dp(44), dp(44)));
+        header.addView(back, new LinearLayout.LayoutParams(dp(56), dp(56)));
         LinearLayout titleBlock = style.column();
-        title = singleLine("", 22, LibraryUi.TEXT, true);
-        subtitle = singleLine("", 12, LIGHT_TEXT, false);
+        title = singleLine("", 26, LibraryUi.TEXT, true);
+        subtitle = singleLine("", 18, LIGHT_TEXT, false);
         titleBlock.addView(title);
         titleBlock.addView(subtitle);
         LinearLayout.LayoutParams titleBounds = new LinearLayout.LayoutParams(0, -2, 1);
@@ -132,9 +132,9 @@ final class FullscreenPlaybackView extends FrameLayout {
         transportRow = new FrameLayout(context);
         bottom.addView(transportRow, new LinearLayout.LayoutParams(-1, -2));
         counters = new LinearLayout(context);
-        time = singleLine("0:00 / —", 12, LibraryUi.TEXT, false);
+        time = singleLine("0:00 / —", 20, LibraryUi.TEXT, false);
         time.setId(R.id.playback_elapsed);
-        quality = singleLine(qualityLimit, 12, LIGHT_TEXT, false);
+        quality = singleLine(qualityLimit, 18, LIGHT_TEXT, false);
         quality.setGravity(Gravity.END);
         quality.setContentDescription("播放画质上限 " + qualityLimit);
         counters.addView(time, new LinearLayout.LayoutParams(0, -2, 1));
@@ -150,15 +150,15 @@ final class FullscreenPlaybackView extends FrameLayout {
         play.setId(R.id.playback_toggle);
         play.setTextColor(0xff0a2531);
         play.setTextSize(24);
-        play.setBackground(style.rounded(0xffecf8fc, 27));
+        play.setBackground(style.rounded(0xffecf8fc, 33));
         play.setClipToOutline(true);
-        LinearLayout.LayoutParams playBounds = new LinearLayout.LayoutParams(dp(54), dp(54));
+        LinearLayout.LayoutParams playBounds = new LinearLayout.LayoutParams(dp(66), dp(66));
         playBounds.setMarginStart(dp(8));
         transport.addView(play, playBounds);
         forward = addControl(transport, "+15 秒", "前进 15 秒", () -> seekBy(15_000));
         next = addControl(transport, "下一集 ›", "下一集", nextEpisode);
 
-        message = style.label("", 15, LibraryUi.TEXT, false);
+        message = style.label("", 20, LibraryUi.TEXT, false);
         message.setGravity(Gravity.CENTER);
         message.setPadding(dp(16), dp(12), dp(16), dp(12));
         message.setBackground(style.rounded(0xc0202020, LibraryUi.RADIUS_PANEL));
@@ -174,16 +174,16 @@ final class FullscreenPlaybackView extends FrameLayout {
         trackPanel.setClickable(true);
         trackPanel.setVisibility(GONE);
         if (Build.VERSION.SDK_INT >= 28) trackPanel.setAccessibilityPaneTitle("播放轨道");
-        addView(trackPanel, new LayoutParams(dp(274), -2, Gravity.TOP | Gravity.END));
+        addView(trackPanel, new LayoutParams(dp(360), -2, Gravity.TOP | Gravity.END));
         LinearLayout trackHeader = new LinearLayout(context);
         trackHeader.setGravity(Gravity.CENTER_VERTICAL);
-        trackTitle = singleLine("", 17, LibraryUi.TEXT, true);
+        trackTitle = singleLine("", 24, LibraryUi.TEXT, true);
         trackTitle.setPadding(dp(10), 0, 0, 0);
         trackHeader.addView(trackTitle, new LinearLayout.LayoutParams(0, -2, 1));
         TextView closeChoices = control("×", "关闭菜单", this::dismissChoices);
         closeChoices.setTextSize(24);
         closeChoices.setBackgroundColor(Color.TRANSPARENT);
-        trackHeader.addView(closeChoices, new LinearLayout.LayoutParams(dp(44), dp(44)));
+        trackHeader.addView(closeChoices, new LinearLayout.LayoutParams(dp(56), dp(56)));
         trackPanel.addView(trackHeader);
         trackScroll = new ScrollView(context);
         trackList = style.column();
@@ -217,10 +217,10 @@ final class FullscreenPlaybackView extends FrameLayout {
     }
 
     private TextView control(String label, String description, Runnable action) {
-        TextView button = style.label(label, 13, LibraryUi.TEXT, true);
+        TextView button = style.label(label, 20, LibraryUi.TEXT, true);
         button.setSingleLine();
         button.setGravity(Gravity.CENTER);
-        button.setMinWidth(dp(44));
+        button.setMinWidth(dp(56));
         button.setPadding(dp(8), 0, dp(8), 0);
         button.setContentDescription(description);
         button.setBackground(outline(CONTROL_BACKGROUND, CONTROL_BORDER, LibraryUi.RADIUS_CONTROL));
@@ -233,7 +233,7 @@ final class FullscreenPlaybackView extends FrameLayout {
 
     private TextView addControl(LinearLayout row, String label, String description, Runnable action) {
         TextView button = control(label, description, action);
-        LinearLayout.LayoutParams bounds = new LinearLayout.LayoutParams(-2, dp(44));
+        LinearLayout.LayoutParams bounds = new LinearLayout.LayoutParams(-2, dp(56));
         if (row.getChildCount() > 0) bounds.setMarginStart(dp(6));
         row.addView(button, bounds);
         return button;
@@ -473,14 +473,14 @@ final class FullscreenPlaybackView extends FrameLayout {
         header.setPadding(gutter + leftInset, dp(14) + topInset, gutter + rightInset, dp(20));
         bottom.setPadding(gutter + leftInset, 0, gutter + rightInset, dp(14) + bottomInset);
         boolean compact = getWidth() - leftInset - rightInset < dp(545);
-        transportRow.setMinimumHeight(dp(compact ? 78 : 54));
+        transportRow.setMinimumHeight(dp(100));
         LayoutParams counterBounds = (LayoutParams) counters.getLayoutParams();
-        counterBounds.gravity = compact ? Gravity.TOP : Gravity.CENTER_VERTICAL;
+        counterBounds.gravity = Gravity.TOP;
         counters.setLayoutParams(counterBounds);
         LayoutParams panelBounds = (LayoutParams) trackPanel.getLayoutParams();
-        panelBounds.topMargin = topInset + dp(66);
+        panelBounds.topMargin = topInset + dp(86);
         panelBounds.setMarginEnd(gutter + rightInset);
-        panelBounds.width = Math.max(dp(160), Math.min(dp(274), getWidth() - leftInset - rightInset - 2 * gutter));
+        panelBounds.width = Math.max(dp(160), Math.min(dp(360), getWidth() - leftInset - rightInset - 2 * gutter));
         trackPanel.setLayoutParams(panelBounds);
         fitTrackList();
     }
@@ -497,7 +497,7 @@ final class FullscreenPlaybackView extends FrameLayout {
             inset = Math.min(fullHeight / 2, Math.max(0, overlap + dp(3)));
         }
         if (captions.getPaddingBottom() != inset) captions.setPadding(0, 0, 0, inset);
-        captions.setFixedTextSize(TypedValue.COMPLEX_UNIT_PX, fullHeight * SubtitleView.DEFAULT_TEXT_SIZE_FRACTION);
+        captions.setFixedTextSize(TypedValue.COMPLEX_UNIT_PX, Math.max(fullHeight * SubtitleView.DEFAULT_TEXT_SIZE_FRACTION, android.util.TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 28, getResources().getDisplayMetrics())));
         float defaultGap = fullHeight * SubtitleView.DEFAULT_BOTTOM_PADDING_FRACTION;
         captions.setBottomPaddingFraction(Math.max(0, defaultGap - inset) / (fullHeight - inset));
         updateCaptionCues();
@@ -578,8 +578,8 @@ final class FullscreenPlaybackView extends FrameLayout {
         row.setBackground(style.rounded(selected ? SELECTED_BACKGROUND : Color.TRANSPARENT,
                 LibraryUi.RADIUS_CONTROL));
         LinearLayout copy = style.column();
-        copy.addView(singleLine(lines[0], 14, selected ? 0xffa6e9ff : LibraryUi.TEXT, selected));
-        if (lines.length > 1) copy.addView(singleLine(lines[1], 11, LIGHT_TEXT, false));
+        copy.addView(singleLine(lines[0], 21, selected ? 0xffa6e9ff : LibraryUi.TEXT, selected));
+        if (lines.length > 1) copy.addView(singleLine(lines[1], 17, LIGHT_TEXT, false));
         row.addView(copy, new LinearLayout.LayoutParams(0, -2, 1));
         if (selected) {
             TextView check = style.label("✓", 16, 0xffa6e9ff, true);

@@ -182,8 +182,8 @@ public final class MainActivity extends Activity {
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPadding(gutter, 0, gutter, 0);
-        row.setBackgroundColor(library ? LibraryUi.BACKGROUND : LibraryUi.PANEL);
-        root.addView(row, new LinearLayout.LayoutParams(-1, dp(library ? 56 : 61)));
+        row.setBackgroundColor(LibraryUi.BACKGROUND);
+        root.addView(row, new LinearLayout.LayoutParams(-1, dp(76)));
         if (back != null) toolbarButton(row, "‹", "返回", library, back);
         boolean home = getString(R.string.app_name).equals(title) && back == null;
         if (home) {
@@ -191,7 +191,7 @@ public final class MainActivity extends Activity {
             logoBounds.setMarginStart(-dp(5));
             row.addView(libraryUi.brandMark(), logoBounds);
         }
-        TextView heading = libraryUi.label(title, home ? 22 : library ? 19 : 16, LibraryUi.TEXT, true);
+        TextView heading = libraryUi.label(title, 24, LibraryUi.TEXT, true);
         heading.setSingleLine();
         heading.setEllipsize(android.text.TextUtils.TruncateAt.END);
         heading.setPadding(back != null || home ? dp(10) : 0, 0, dp(4), 0);
@@ -203,16 +203,19 @@ public final class MainActivity extends Activity {
     }
 
     private void toolbarButton(LinearLayout row, String icon, String description, boolean flat, Runnable action) {
-        TextView button = libraryUi.label(icon, 23, flat ? LibraryUi.MUTED : LibraryUi.TEXT, true);
-        button.setContentDescription(description);
+        LinearLayout button = column();
         button.setGravity(Gravity.CENTER);
-        if (!flat) {
-            GradientDrawable background = libraryUi.rounded(0x0cffffff, LibraryUi.RADIUS_CONTROL);
-            background.setStroke(dp(1), 0x0fffffff);
-            button.setBackground(background);
-        }
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(44), dp(44));
-        if (row.getChildCount() != 0) params.setMarginStart(dp(8));
+        button.setContentDescription(description);
+        android.widget.ImageView image = new android.widget.ImageView(this);
+        image.setImageResource("‹".equals(icon) ? R.drawable.ic_back : "⌕".equals(icon) ? R.drawable.ic_search : R.drawable.ic_settings);
+        image.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        button.addView(image, new LinearLayout.LayoutParams(dp(26), dp(26)));
+        TextView caption = libraryUi.label("‹".equals(icon) ? "返回" : "⌕".equals(icon) ? "搜索" : "设置", 17, LibraryUi.TEXT, false);
+        caption.setGravity(Gravity.CENTER);
+        caption.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        button.addView(caption);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(52), dp(60));
+        if (row.getChildCount() != 0) params.setMarginStart(dp(4));
         row.addView(button, params);
         libraryUi.actionable(button, action);
     }
@@ -230,16 +233,18 @@ public final class MainActivity extends Activity {
             int color = active ? LibraryUi.ACCENT_LIGHT : LibraryUi.MUTED;
             LinearLayout target = column();
             target.setGravity(Gravity.CENTER);
-            target.setMinimumHeight(dp(53));
+            target.setMinimumHeight(dp(68));
             target.setContentDescription(tab.title);
             target.setSelected(active);
             row.addView(target, new LinearLayout.LayoutParams(0, -2, 1));
-            TextView icon = libraryUi.label(tab.icon, 19, color, true);
-            icon.setGravity(Gravity.CENTER);
+            android.widget.ImageView icon = new android.widget.ImageView(this);
+            icon.setImageResource(tab == BrowseTab.HOME ? R.drawable.ic_home : tab == BrowseTab.LIBRARY ? R.drawable.ic_library : R.drawable.ic_settings);
+            icon.setImageTintList(ColorStateList.valueOf(color));
+            icon.setPadding(dp(14), dp(3), dp(14), dp(3));
             if (active) icon.setBackground(libraryUi.rounded(LibraryUi.SELECTED, LibraryUi.RADIUS_CONTROL));
             icon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-            target.addView(icon, new LinearLayout.LayoutParams(dp(53), dp(28)));
-            TextView label = libraryUi.label(tab.title, 12, color, active);
+            target.addView(icon, new LinearLayout.LayoutParams(dp(56), dp(32)));
+            TextView label = libraryUi.label(tab.title, 20, color, active);
             label.setGravity(Gravity.CENTER);
             label.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
             LinearLayout.LayoutParams labelParams = new LinearLayout.LayoutParams(-1, -2);
@@ -262,12 +267,14 @@ public final class MainActivity extends Activity {
         ConnectionSettings old = draft == null ? settings : draft;
         section(view, "家庭 HTTP 代理");
         LinearLayout address = new LinearLayout(this);
+        if (getResources().getConfiguration().screenWidthDp <= 355) address.setOrientation(LinearLayout.VERTICAL);
         view.addView(address);
         LinearLayout hostGroup = column();
         hostGroup.setPadding(0, 0, dp(10), 0);
-        address.addView(hostGroup, new LinearLayout.LayoutParams(0, -2, 1));
+        address.addView(hostGroup, address.getOrientation() == LinearLayout.VERTICAL
+                ? new LinearLayout.LayoutParams(-1, -2) : new LinearLayout.LayoutParams(0, -2, 1));
         LinearLayout portGroup = column();
-        address.addView(portGroup, new LinearLayout.LayoutParams(dp(82), -2));
+        address.addView(portGroup, new LinearLayout.LayoutParams(address.getOrientation() == LinearLayout.VERTICAL ? -1 : dp(100), -2));
         EditText host = settingsField(hostGroup, "代理地址", old == null ? "" : old.host, false);
         EditText port = settingsField(portGroup, "端口", old == null ? "" : Integer.toString(old.port), false);
         port.setInputType(InputType.TYPE_CLASS_NUMBER);
@@ -279,9 +286,7 @@ public final class MainActivity extends Activity {
         EditText password = settingsField(view, "Jellyfin 密码", old == null ? "" : old.password, true);
         settingsSection(view, "播放画质");
         LinearLayout qualities = new LinearLayout(this);
-        if (getResources().getConfiguration().screenWidthDp <= 355) {
-            qualities.setOrientation(LinearLayout.VERTICAL);
-        }
+        qualities.setOrientation(LinearLayout.VERTICAL);
         view.addView(qualities);
         Spinner resolution = qualityField(qualities, "分辨率上限", PlaybackPolicy.RESOLUTION_LABELS,
                 PlaybackPolicy.optionIndex(PlaybackPolicy.WIDTHS, old == null ? PlaybackPolicy.WIDTH : old.resolution, PlaybackPolicy.WIDTH));
@@ -313,15 +318,15 @@ public final class MainActivity extends Activity {
     }
 
     private EditText settingsField(LinearLayout parent, String title, String value, boolean secret) {
-        TextView label = libraryUi.label(title, 13, LibraryUi.MUTED, false);
+        TextView label = libraryUi.label(title, 20, LibraryUi.MUTED, false);
         label.setPadding(0, dp(8), 0, 0);
         parent.addView(label);
         EditText input = field(parent, title, value, secret);
         input.setHint("");
         input.setId(View.generateViewId());
         label.setLabelFor(input.getId());
-        input.setTextSize(15);
-        input.setMinHeight(dp(44));
+        input.setTextSize(22);
+        input.setMinHeight(dp(58));
         input.setBackgroundTintList(new ColorStateList(
                 new int[][] { { android.R.attr.state_focused }, {} },
                 new int[] { LibraryUi.ACCENT, 0xff575757 }));
@@ -334,16 +339,31 @@ public final class MainActivity extends Activity {
         row.addView(group, row.getOrientation() == LinearLayout.VERTICAL
                 ? new LinearLayout.LayoutParams(-1, -2)
                 : new LinearLayout.LayoutParams(0, -2, 1));
-        text(group, title).setTextSize(12);
+        text(group, title).setTextSize(20);
         Spinner spinner = new Spinner(this, Spinner.MODE_DROPDOWN);
-        ArrayAdapter<String> adapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, options);
+        ArrayAdapter<String> adapter = new ArrayAdapter<String>(this, android.R.layout.simple_spinner_item, options) {
+            private View readable(View view) {
+                TextView label = (TextView) view;
+                label.setTextSize(22);
+                label.setTextColor(LibraryUi.TEXT);
+                label.setMinHeight(dp(58));
+                label.setGravity(Gravity.CENTER_VERTICAL);
+                return view;
+            }
+            @Override public View getView(int position, View reuse, android.view.ViewGroup parent) {
+                return readable(super.getView(position, reuse, parent));
+            }
+            @Override public View getDropDownView(int position, View reuse, android.view.ViewGroup parent) {
+                return readable(super.getDropDownView(position, reuse, parent));
+            }
+        };
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         spinner.setAdapter(adapter);
         spinner.setSelection(selection);
         spinner.setContentDescription(title);
         spinner.setBackgroundTintList(ColorStateList.valueOf(0xff575757));
         spinner.setPopupBackgroundDrawable(libraryUi.rounded(LibraryUi.PANEL, LibraryUi.RADIUS_PANEL));
-        group.addView(spinner, new LinearLayout.LayoutParams(-1, dp(44)));
+        group.addView(spinner, new LinearLayout.LayoutParams(-1, dp(58)));
         return spinner;
     }
 
@@ -353,7 +373,7 @@ public final class MainActivity extends Activity {
         GradientDrawable backdrop = libraryUi.rounded(LibraryUi.PANEL, LibraryUi.RADIUS_PANEL);
         backdrop.setStroke(dp(1), 0xff454545);
         body.setBackground(backdrop);
-        body.addView(libraryUi.label("确认保存设置", 20, LibraryUi.TEXT, true));
+        body.addView(libraryUi.label("确认保存设置", 26, LibraryUi.TEXT, true));
         EditText confirmation = settingsField(body, "确认密码", "", true);
         confirmation.setBackgroundTintList(null);
         confirmation.setBackground(inputOutline());
@@ -449,73 +469,92 @@ public final class MainActivity extends Activity {
         button(view, "连接设置", () -> settingsPage(""));
     }
 
+    private boolean homePlayLoading;
+
     private void homePage() {
+        homePlayLoading = false;
         stopPlayback();
         browseTab = BrowseTab.HOME;
         LinearLayout view = panel(getString(R.string.app_name), true, null, browseTab);
-        view.setPadding(0, dp(19), 0, dp(30));
-        for (HomeShelf shelf : HomeShelf.values()) {
-            LinearLayout group = column();
-            LinearLayout.LayoutParams groupParams = new LinearLayout.LayoutParams(-1, -2);
-            groupParams.bottomMargin = shelf == HomeShelf.LATEST ? 0 : dp(25);
-            view.addView(group, groupParams);
-            TextView heading = libraryUi.label(shelf.title, 20, LibraryUi.TEXT, true);
-            heading.setPadding(contentGutter(), 0, contentGutter(), dp(10));
-            group.addView(heading);
-            LinearLayout list = column();
-            group.addView(list);
-            fillHome(group, list, shelf);
-        }
+        view.setPadding(contentGutter(), dp(22), contentGutter(), dp(32));
+        fillHome(view);
     }
 
-    private enum HomeShelf {
-        RESUME("继续观看", true), NEXT("接下来", true), LATEST("最近添加", false);
-        final String title;
-        final boolean wide;
-        HomeShelf(String title, boolean wide) { this.title = title; this.wide = wide; }
-    }
-
-    private void fillHome(LinearLayout group, LinearLayout list, HomeShelf shelf) {
+    private void fillHome(LinearLayout view) {
         int expected = page;
-        TextView state = text(list, "正在加载…");
-        state.setPadding(contentGutter(), dp(6), contentGutter(), dp(6));
+        TextView state = text(view, "正在加载…");
         JellyfinApi connection = api;
         browse.execute(() -> {
             try {
-                List<JellyfinApi.Item> items;
-                switch (shelf) {
-                    case RESUME: items = connection.resumeItems(); break;
-                    case NEXT: items = connection.nextItems(); break;
-                    default: items = recentItems(connection.latestItems()); break;
-                }
-                for (java.util.Iterator<JellyfinApi.Item> iterator = items.iterator(); iterator.hasNext();) {
-                    JellyfinApi.Item item = iterator.next();
-                    if (shelf == HomeShelf.RESUME && item.resumeMs <= 0
-                            || shelf == HomeShelf.NEXT && (item.played || item.resumeMs > 0)) {
-                        iterator.remove();
+                HomeFeed.Result<JellyfinApi.Item> result = HomeFeed.load(new HomeFeed.Source<JellyfinApi.Item>() {
+                    @Override public List<JellyfinApi.Item> resume() throws Exception {
+                        List<JellyfinApi.Item> items = connection.resumeItems();
+                        for (java.util.Iterator<JellyfinApi.Item> it = items.iterator(); it.hasNext();) {
+                            JellyfinApi.Item item = it.next();
+                            if (item.resumeMs <= 0 || item.played
+                                    || item.durationMs > 0 && item.resumeMs >= item.durationMs) it.remove();
+                        }
+                        return items;
                     }
-                }
+                    @Override public List<JellyfinApi.Item> latest() throws Exception {
+                        return recentItems(connection.latestItems());
+                    }
+                });
                 onPage(expected, () -> {
-                    if (items.isEmpty()) {
-                        if (shelf == HomeShelf.NEXT || shelf == HomeShelf.LATEST) group.setVisibility(View.GONE);
-                        else state.setText("暂无未看完的影片。");
+                    view.removeAllViews();
+                    TextView heading = libraryUi.label(result.resume ? "继续观看" : "最近添加", 26, LibraryUi.TEXT, true);
+                    heading.setPadding(0, 0, 0, dp(16));
+                    view.addView(heading);
+                    if (result.items.isEmpty()) {
+                        text(view, "暂无可播放的影片。");
                     } else {
-                        list.removeView(state);
-                        boolean resume = shelf == HomeShelf.RESUME;
-                        LibraryUi.ItemAction action = resume
-                                ? item -> playbackPage(item, item.resumeMs, this::homePage)
-                                : item -> openItem(item, this::homePage);
-                        list.addView(libraryUi.rail(items, shelf.wide, resume, contentGutter(), action));
+                        view.addView(libraryUi.homeList(result.items, result.resume, screenWidth(),
+                                item -> openHomeDetails(item), item -> playHomeItem(item)));
                     }
-                    Log.i(JellyfinApi.TAG, "Home shelf=" + shelf.name() + " items=" + items.size());
+                    Log.i(JellyfinApi.TAG, "Home section=" + (result.resume ? "RESUME" : "LATEST")
+                            + " items=" + result.items.size());
                 });
             } catch (Exception error) {
                 onPage(expected, () -> {
-                    state.setText(message(error, "读取" + shelf.title + "失败"));
-                    button(list, "重试", () -> {
-                        list.removeAllViews();
-                        fillHome(group, list, shelf);
+                    state.setText(message(error, "读取首页失败"));
+                    button(view, "重试", () -> {
+                        view.removeAllViews();
+                        fillHome(view);
                     });
+                });
+            }
+        });
+    }
+
+    private void openHomeDetails(JellyfinApi.Item item) {
+        if ("Episode".equals(item.type) && item.seriesId.isEmpty()) {
+            android.widget.Toast.makeText(this, "无法读取所属剧集，请刷新后重试。", android.widget.Toast.LENGTH_SHORT).show();
+            return;
+        }
+        detailsPage(item, this::homePage);
+    }
+
+    private void playHomeItem(JellyfinApi.Item item) {
+        if (!item.series) {
+            playbackPage(item, item.resumeMs, this::homePage);
+            return;
+        }
+        if (homePlayLoading) return;
+        homePlayLoading = true;
+        int expected = page;
+        JellyfinApi connection = api;
+        browse.execute(() -> {
+            try {
+                JellyfinApi.Item target = connection.seriesPlaybackTarget(item);
+                onPage(expected, () -> {
+                    homePlayLoading = false;
+                    if (target == null) android.widget.Toast.makeText(this, "暂无可播放的单集。", android.widget.Toast.LENGTH_SHORT).show();
+                    else playbackPage(target, target.resumeMs, this::homePage);
+                });
+            } catch (Exception error) {
+                onPage(expected, () -> {
+                    homePlayLoading = false;
+                    android.widget.Toast.makeText(this, message(error, "读取播放单集失败"), android.widget.Toast.LENGTH_LONG).show();
                 });
             }
         });
@@ -572,7 +611,7 @@ public final class MainActivity extends Activity {
         HorizontalScrollView tabs = new HorizontalScrollView(this);
         tabs.setHorizontalScrollBarEnabled(false);
         LinearLayout row = new LinearLayout(this);
-        row.setPadding(contentGutter(), 0, contentGutter(), dp(12));
+        row.setPadding(contentGutter(), 0, contentGutter(), dp(16));
         tabs.addView(row);
         root.addView(tabs, root.indexOfChild(content), new LinearLayout.LayoutParams(-1, -2));
         view.setPadding(contentGutter(), 0, contentGutter(), dp(24));
@@ -755,7 +794,7 @@ public final class MainActivity extends Activity {
         JellyfinApi connection = api;
         worker.execute(() -> {
             try {
-                JellyfinApi.Item item = connection.details(initial);
+                JellyfinApi.Item item = connection.details("Episode".equals(initial.type) ? initial.seriesId : initial.id);
                 onPage(expected, () -> {
                     view.removeView(state);
                     showDetails(view, item, back, seasonId);
@@ -772,9 +811,9 @@ public final class MainActivity extends Activity {
     private void showDetails(LinearLayout pageView, JellyfinApi.Item item, Runnable back, String seasonId) {
         pageView.setPadding(0, 0, 0, dp(24));
         int screenDp = getResources().getConfiguration().screenWidthDp;
-        int coverHeight = Math.max(176, Math.min(260,
-                Math.round(getResources().getConfiguration().screenHeightDp * 0.3f)));
-        int posterWidth = Math.max(90, Math.min(128, Math.round(screenDp * 0.3f)));
+        int coverHeight = Math.max(185, Math.min(228,
+                Math.round(getResources().getConfiguration().screenHeightDp * 0.27f)));
+        int posterWidth = Math.max(94, Math.min(114, Math.round(screenDp * 0.27f)));
         int posterHeight = posterWidth * 3 / 2;
         int overlap = Math.round(posterWidth * 0.88f);
         pageView.addView(libraryUi.hero(item), new LinearLayout.LayoutParams(-1, dp(coverHeight)));
@@ -808,7 +847,7 @@ public final class MainActivity extends Activity {
         view.setPadding(contentGutter(), dp(20), contentGutter(), 0);
         LinearLayout.LayoutParams body = new LinearLayout.LayoutParams(-1, -2);
         pageView.addView(view, body);
-        int titleSize = Math.max(25, Math.min(34, Math.round(screenDp * 0.072f)));
+        int titleSize = 30;
         TextView title = libraryUi.label(item.title, titleSize, LibraryUi.TEXT, true);
         title.setIncludeFontPadding(false);
         title.setGravity(Gravity.CENTER);
@@ -819,15 +858,17 @@ public final class MainActivity extends Activity {
         if ("Movie".equals(item.type)) metadata.add("电影");
         if (item.durationMs > 0) metadata.add(item.durationMs / 60_000 + " 分钟");
         if (!metadata.isEmpty()) {
-            TextView info = libraryUi.label(TextUtils.join(" · ", metadata), 13, LibraryUi.MUTED, false);
+            TextView info = libraryUi.label(TextUtils.join(" · ", metadata), 18, LibraryUi.MUTED, false);
             info.setGravity(Gravity.CENTER);
             info.setPadding(0, dp(7), 0, 0);
             heading.addView(info);
         }
         if (item.played) watched(heading);
+        LinearLayout playbackArea = column();
+        ribbon.addView(playbackArea, new LinearLayout.LayoutParams(-1, -2));
         if (!item.series) {
             Runnable returnToDetails = () -> detailsPage(item, back);
-            detailPlaybackActions(heading, item, returnToDetails);
+            detailPlaybackActions(playbackArea, item, returnToDetails);
             if (item.resumeMs > 0) {
                 if (item.durationMs > 0) {
                     LinearLayout.LayoutParams progress = new LinearLayout.LayoutParams(-1, dp(5));
@@ -840,11 +881,11 @@ public final class MainActivity extends Activity {
         }
         if (!item.overview.isEmpty()) {
             TextView overview = text(view, item.overview);
-            overview.setTextSize(15);
-            overview.setLineSpacing(dp(4), 1);
+            overview.setTextSize(20);
+            overview.setLineSpacing(0, 1.65f);
             overview.setPadding(0, 0, 0, dp(16));
         }
-        if (item.series) showSeasons(view, heading, item, back, seasonId);
+        if (item.series) showSeasons(view, playbackArea, item, back, seasonId);
     }
 
     private void detailPlaybackActions(LinearLayout heading, JellyfinApi.Item item, Runnable returnToDetails) {
@@ -868,6 +909,8 @@ public final class MainActivity extends Activity {
                             bounds.leftMargin = getLayoutDirection() == View.LAYOUT_DIRECTION_RTL ? 0 : gap;
                             bounds.rightMargin = getLayoutDirection() == View.LAYOUT_DIRECTION_RTL ? gap : 0;
                             bounds.topMargin = wrap && i > 0 ? dp(6) : 0;
+                            bounds.width = wrap ? -1 : i == 0 ? 0 : -2;
+                            bounds.weight = !wrap && i == 0 ? 1 : 0;
                         }
                         super.onMeasure(widthMeasureSpec, heightMeasureSpec);
                     }
@@ -880,7 +923,7 @@ public final class MainActivity extends Activity {
                         () -> playbackPage(item, item.resumeMs, returnToDetails)));
                 actions.addView(detailPlaybackButton("从头播放", false, fromStart));
             } else {
-                LinearLayout.LayoutParams actionBounds = new LinearLayout.LayoutParams(-2, -2);
+                LinearLayout.LayoutParams actionBounds = new LinearLayout.LayoutParams(-1, -2);
                 actionBounds.gravity = Gravity.CENTER_HORIZONTAL;
                 actionBounds.topMargin = dp(12);
                 heading.addView(detailPlaybackButton(item.played ? "重播" : "播放", true, fromStart), actionBounds);
@@ -888,17 +931,17 @@ public final class MainActivity extends Activity {
     }
 
     private TextView detailPlaybackButton(String label, boolean showIcon, Runnable action) {
-        TextView button = libraryUi.label(label, showIcon ? 13 : 12,
+        TextView button = libraryUi.label(label, showIcon ? 21 : 18,
                 showIcon ? LibraryUi.ACCENT_LIGHT : LibraryUi.TEXT, showIcon);
         button.setGravity(Gravity.CENTER);
-        button.setMinHeight(dp(44));
+        button.setMinHeight(dp(56));
         button.setPadding(dp(showIcon ? 14 : 10), 0, dp(showIcon ? 14 : 10), 0);
-        android.graphics.drawable.GradientDrawable background = libraryUi.rounded(0x0affffff, LibraryUi.RADIUS_CONTROL);
-        background.setStroke(dp(1), 0x3dffffff);
+        android.graphics.drawable.GradientDrawable background = libraryUi.rounded(showIcon ? 0x1070d5f5 : 0x0affffff, LibraryUi.RADIUS_CONTROL);
+        background.setStroke(dp(1), showIcon ? 0x8070d5f5 : 0x3dffffff);
         button.setBackground(background);
         android.graphics.drawable.Drawable icon = getDrawable(R.drawable.ic_quick_play).mutate();
         icon.setTint(LibraryUi.ACCENT_LIGHT);
-        icon.setBounds(0, 0, dp(22), dp(22));
+        icon.setBounds(0, 0, dp(26), dp(26));
         button.setCompoundDrawablesRelative(showIcon ? icon : null, null, null, null);
         button.setCompoundDrawablePadding(dp(6));
         libraryUi.actionable(button, action);
@@ -917,7 +960,7 @@ public final class MainActivity extends Activity {
         searchBounds.bottomMargin = dp(17);
         search.setLayoutParams(searchBounds);
         search.setMinHeight(dp(44));
-        search.setTextSize(15);
+        search.setTextSize(22);
         search.setPadding(dp(11), dp(8), dp(11), dp(8));
         search.setBackground(inputOutline());
         search.setImeOptions(EditorInfo.IME_ACTION_SEARCH);
@@ -1006,7 +1049,7 @@ public final class MainActivity extends Activity {
         LinearLayout header = new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
         picker.addView(header);
-        TextView selectionTitle = libraryUi.label("选集", 20, LibraryUi.TEXT, true);
+        TextView selectionTitle = libraryUi.label("选集", 26, LibraryUi.TEXT, true);
         selectionTitle.setGravity(Gravity.CENTER_VERTICAL);
         header.addView(selectionTitle, new LinearLayout.LayoutParams(0, dp(48), 1));
         LinearLayout playbackActions = column();
@@ -1018,14 +1061,7 @@ public final class MainActivity extends Activity {
         JellyfinApi connection = api;
         browse.execute(() -> {
             try {
-                List<JellyfinApi.Item> episodes = connection.episodes(series, null);
-                JellyfinApi.Item target = null;
-                for (JellyfinApi.Item episode : episodes) {
-                    if (episode.resumeMs > 0) { target = episode; break; }
-                    if (target == null && !episode.played) target = episode;
-                }
-                if (target == null && !episodes.isEmpty()) target = episodes.get(0);
-                JellyfinApi.Item chosen = target;
+                JellyfinApi.Item chosen = connection.seriesPlaybackTarget(series);
                 onPage(expected, () -> {
                     if (chosen == null) return;
                     detailPlaybackActions(playbackActions, chosen,
@@ -1087,19 +1123,19 @@ public final class MainActivity extends Activity {
     }
 
     private TextView addLibraryTab(LinearLayout row, String title, boolean selected) {
-        TextView tab = libraryUi.label(title, 14, selected ? LibraryUi.ACCENT_LIGHT : LibraryUi.MUTED, selected);
+        TextView tab = libraryUi.label(title, 20, selected ? LibraryUi.ACCENT_LIGHT : LibraryUi.MUTED, selected);
         tab.setSingleLine();
         tab.setSelected(selected);
         tab.setGravity(Gravity.CENTER);
         tab.setPadding(dp(2), 0, dp(2), 0);
         tab.setMinWidth(dp(44));
-        tab.setMinHeight(dp(44));
+        tab.setMinHeight(dp(58));
         if (selected) {
             GradientDrawable line = libraryUi.rounded(LibraryUi.ACCENT_LIGHT, 2);
             LayerDrawable marker = new LayerDrawable(new Drawable[] { line });
-            marker.setLayerSize(0, dp(18), dp(2));
+            marker.setLayerSize(0, dp(28), dp(3));
             marker.setLayerGravity(0, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
-            marker.setLayerInsetBottom(0, dp(3));
+            marker.setLayerInsetBottom(0, dp(5));
             tab.setBackground(marker);
         }
         int gap = Math.max(14, Math.min(23, Math.round(getResources().getConfiguration().screenWidthDp * 0.04f)));
@@ -1110,11 +1146,11 @@ public final class MainActivity extends Activity {
     }
 
     private TextView addChip(LinearLayout row, String title) {
-        TextView tab = libraryUi.label(title, 13, LibraryUi.TEXT, true);
+        TextView tab = libraryUi.label(title, 20, LibraryUi.TEXT, true);
         tab.setGravity(Gravity.CENTER);
         tab.setPadding(dp(15), 0, dp(15), 0);
         tab.setSingleLine();
-        tab.setMinHeight(dp(44));
+        tab.setMinHeight(dp(58));
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-2, -2);
         params.setMarginEnd(dp(8));
         row.addView(tab, params);
@@ -1172,9 +1208,9 @@ public final class MainActivity extends Activity {
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPadding(0, dp(7), 0, dp(7));
-        row.setMinimumHeight(dp(68));
+        row.setMinimumHeight(dp(110));
         list.addView(row, new LinearLayout.LayoutParams(-1, -2));
-        row.addView(libraryUi.picture(episode, true), new LinearLayout.LayoutParams(dp(90), dp(51)));
+        row.addView(libraryUi.picture(episode, true), new LinearLayout.LayoutParams(dp(96), dp(54)));
         LinearLayout body = column();
         body.setPadding(dp(10), 0, 0, 0);
         row.addView(body, new LinearLayout.LayoutParams(0, -2, 1));
@@ -1182,19 +1218,19 @@ public final class MainActivity extends Activity {
         String name = episode.index > 0
                 ? "第 " + episode.index + " 集" + (episodeTitle.isEmpty() ? "" : " · " + episodeTitle)
                 : episode.title;
-        TextView episodeLabel = libraryUi.label(name, 14, LibraryUi.TEXT, true);
+        TextView episodeLabel = libraryUi.label(name, 21, LibraryUi.TEXT, true);
         episodeLabel.setMaxLines(2);
         episodeLabel.setEllipsize(TextUtils.TruncateAt.END);
         body.addView(episodeLabel);
         String info = episode.durationMs > 0 ? episode.durationMs / 60_000 + " 分钟" : "";
         if (episode.resumeMs > 0) info += (info.isEmpty() ? "" : " · ") + "已看到 " + LibraryUi.time(episode.resumeMs);
-        if (!info.isEmpty()) body.addView(libraryUi.label(info, 12, LibraryUi.MUTED, false));
+        if (!info.isEmpty()) body.addView(libraryUi.label(info, 17, LibraryUi.MUTED, false));
         if (episode.played) watched(row);
         libraryUi.actionable(row, open);
     }
 
     private void watched(LinearLayout parent) {
-        TextView badge = libraryUi.label("✓ 已看完", 11, LibraryUi.ACCENT_LIGHT, true);
+        TextView badge = libraryUi.label("✓ 已看完", 16, LibraryUi.ACCENT_LIGHT, true);
         badge.setPadding(dp(8), dp(5), dp(8), dp(5));
         badge.setBackground(libraryUi.rounded(LibraryUi.SELECTED, LibraryUi.RADIUS_SMALL));
         parent.addView(badge, new LinearLayout.LayoutParams(-2, -2));
@@ -1741,7 +1777,7 @@ public final class MainActivity extends Activity {
     private int contentGutter() { return dp(getResources().getConfiguration().screenWidthDp <= 355 ? 16 : 20); }
     private int screenWidth() { return Math.max(1, getResources().getDisplayMetrics().widthPixels - 2 * contentGutter()); }
     private void section(LinearLayout parent, String title) {
-        TextView heading = libraryUi.label(title, 19, LibraryUi.TEXT, true);
+        TextView heading = libraryUi.label(title, 26, LibraryUi.TEXT, true);
         heading.setPadding(0, dp(18), 0, dp(9));
         parent.addView(heading);
     }
@@ -1752,7 +1788,7 @@ public final class MainActivity extends Activity {
         return layout;
     }
     private TextView text(LinearLayout parent, String text) {
-        TextView field = libraryUi.label(text, 14, LibraryUi.MUTED, false);
+        TextView field = libraryUi.label(text, 18, LibraryUi.MUTED, false);
         field.setPadding(0, dp(6), 0, dp(6));
         parent.addView(field);
         return field;
@@ -1769,8 +1805,8 @@ public final class MainActivity extends Activity {
                 LibraryUi.RADIUS_CONTROL);
         if (!primary) background.setStroke(dp(1), LibraryUi.LINE);
         button.setBackground(background);
-        button.setTextSize(14);
-        button.setMinHeight(dp(48));
+        button.setTextSize(20);
+        button.setMinHeight(dp(56));
         button.setPadding(dp(17), dp(5), dp(17), dp(5));
         libraryUi.actionable(button, action);
         return button;
@@ -1797,6 +1833,8 @@ public final class MainActivity extends Activity {
     }
     private EditText field(LinearLayout parent, String hint, String value, boolean secret) {
         EditText field = new EditText(this);
+        field.setTextSize(22);
+        field.setMinHeight(dp(58));
         field.setHint(hint);
         field.setContentDescription(hint);
         field.setSingleLine(true);

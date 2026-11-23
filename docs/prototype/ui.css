@@ -21,8 +21,10 @@
 }
 
 * { box-sizing: border-box; }
+html { min-height: 100%; background: #0d0e0f; }
 body {
   margin: 0;
+  min-height: 100dvh;
   background: radial-gradient(ellipse at 70% 8%, #16232a, #121719 31%, #0d0e0f 72%);
   color: var(--text);
   font-family: "Microsoft YaHei UI", "PingFang SC", "Noto Sans CJK SC", system-ui, sans-serif;
@@ -131,6 +133,13 @@ main.pad[data-screen="library"] { padding-top: 0; }
   scroll-snap-type: x proximity;
 }
 .rail.resume { grid-auto-columns: clamp(223px, 68vw, 282px); }
+.rail { user-select: none; -webkit-user-select: none; }
+.rail.is-dragging { scroll-snap-type: none; scroll-behavior: auto; }
+.rail.is-dragging, .rail.is-dragging * { cursor: grabbing; }
+@media (hover: hover) and (pointer: fine) {
+  .rail { cursor: grab; }
+  .rail .card { cursor: inherit; }
+}
 .rail.next-up { grid-auto-columns: clamp(143px, 45vw, 178px); }
 .card {
   display: flex; flex-direction: column; align-items: stretch; min-width: 0; width: 100%;

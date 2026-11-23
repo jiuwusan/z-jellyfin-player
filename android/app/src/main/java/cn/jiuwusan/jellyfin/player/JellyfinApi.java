@@ -73,10 +73,29 @@ final class JellyfinApi {
                 .build(), null).getJSONArray("Items"));
     }
 
+    private final java.util.Map<String, Integer> seriesYears = new java.util.concurrent.ConcurrentHashMap<>();
+
     List<Item> resumeItems() throws Exception {
-        return entries(json("读取继续观看", url("Users/" + userId + "/Items/Resume")
+        List<Item> items = entries(json("读取继续观看", url("Users/" + userId + "/Items/Resume")
                 .addQueryParameter("MediaTypes", "Video").addQueryParameter("Limit", "12")
                 .addQueryParameter("EnableUserData", "true").build(), null).getJSONArray("Items"));
+        return displayYears(items);
+    }
+
+    private List<Item> displayYears(List<Item> items) {
+        for (Item item : items) {
+            if (item.seriesId.isEmpty()) continue;
+            Integer year = seriesYears.get(item.seriesId);
+            if (year == null) {
+                try {
+                    year = json("读取剧集年份", url("Items/" + item.seriesId)
+                            .addQueryParameter("userId", userId).build(), null).optInt("ProductionYear");
+                    seriesYears.put(item.seriesId, year);
+                } catch (Exception ignored) { continue; }
+            }
+            item.seriesYear = year;
+        }
+        return items;
     }
 
     List<Item> nextItems() throws Exception {
@@ -86,9 +105,9 @@ final class JellyfinApi {
     }
 
     List<Item> latestItems() throws Exception {
-        return entries(new JSONArray(response("读取最近添加", url("Items/Latest").addQueryParameter("userId", userId)
+        return displayYears(entries(new JSONArray(response("读取最近添加", url("Items/Latest").addQueryParameter("userId", userId)
                 .addQueryParameter("IncludeItemTypes", "Movie,Episode,Video,Series")
-                .addQueryParameter("groupItems", "true").addQueryParameter("limit", "12").build(), null)));
+                .addQueryParameter("groupItems", "true").addQueryParameter("limit", "12").build(), null))));
     }
 
     LibraryItemsPage libraryItems(Item parent, boolean catalog, int offset) throws Exception {
@@ -124,8 +143,22 @@ final class JellyfinApi {
     }
 
     Item details(Item item) throws Exception {
-        return new Item(json("读取影片详情", url("Items/" + item.id)
+        return details(item.id);
+    }
+
+    Item details(String id) throws Exception {
+        return new Item(json("读取影片详情", url("Items/" + id)
                 .addQueryParameter("userId", userId).build(), null));
+    }
+
+    Item seriesPlaybackTarget(Item series) throws Exception {
+        List<Item> episodes = episodes(series, null);
+        Item target = null;
+        for (Item episode : episodes) {
+            if (episode.resumeMs > 0) return episode;
+            if (target == null && !episode.played) target = episode;
+        }
+        return target != null ? target : episodes.isEmpty() ? null : episodes.get(0);
     }
 
     Bitmap artwork(Item item, boolean wide, String seriesBackdropId, boolean originalWidth) throws IOException {
@@ -417,6 +450,9 @@ final class JellyfinApi {
         final boolean series, folder, hasPoster, hasBackdrop, played;
         final long durationMs, resumeMs;
         final int year, index, season;
+        int seriesYear;
+
+        int displayYear() { return seriesId.isEmpty() ? year : seriesYear; }
 
         Item(JSONObject entry) throws Exception {
             id = entry.getString("Id");

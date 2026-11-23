@@ -11,9 +11,10 @@ import android.os.Handler;
 import android.text.TextUtils;
 import android.util.LruCache;
 import android.view.Gravity;
+import android.view.MotionEvent;
+import android.view.ViewConfiguration;
 import android.view.View;
 import android.widget.FrameLayout;
-import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
@@ -30,9 +31,9 @@ final class LibraryUi {
     static final int INPUT = 0xff292929;
     static final int LINE = 0x23ffffff;
     static final int TEXT = Color.WHITE;
-    static final int MUTED = 0xffb8b8b8;
+    static final int MUTED = 0xffd2d2d2;
     static final int ACCENT = 0xff00a4dc;
-    static final int ACCENT_LIGHT = 0xff59c7ed;
+    static final int ACCENT_LIGHT = 0xff70d5f5;
     static final int ON_ACCENT = 0xff061820;
     static final int SELECTED = 0x2500a4dc;
     static final int ERROR = 0xffffabad;
@@ -97,27 +98,53 @@ final class LibraryUi {
         view.setOnClickListener(ignored -> action.run());
     }
 
+    // Returning false on a tap preserves View's click, keyboard and accessibility handling.
+    @android.annotation.SuppressLint("ClickableViewAccessibility")
+    void scrollActionable(View view, Runnable action) {
+        actionable(view, action);
+        TapGesture gesture = new TapGesture(ViewConfiguration.get(context).getScaledTouchSlop());
+        view.setOnTouchListener((target, event) -> {
+            int type = event.getActionMasked();
+            if (type == MotionEvent.ACTION_DOWN) {
+                gesture.start(event.getX(), event.getY());
+                return false;
+            }
+            if (type == MotionEvent.ACTION_CANCEL) {
+                gesture.cancel();
+                return false;
+            }
+            if (type == MotionEvent.ACTION_POINTER_DOWN || type == MotionEvent.ACTION_POINTER_UP) {
+                gesture.cancel();
+            } else if (type == MotionEvent.ACTION_MOVE || type == MotionEvent.ACTION_UP) {
+                if (event.getPointerCount() != 1) gesture.cancel();
+                for (int h = 0; h < event.getHistorySize(); h++) {
+                    gesture.move(event.getHistoricalX(h), event.getHistoricalY(h));
+                }
+                gesture.move(event.getX(), event.getY());
+            } else {
+                return false;
+            }
+            if (!gesture.blocked()) return false;
+            // Cancel View's pressed state and pending click, but leave parent scrolling intact.
+            MotionEvent cancel = MotionEvent.obtain(event);
+            cancel.setAction(MotionEvent.ACTION_CANCEL);
+            try { target.onTouchEvent(cancel); }
+            finally { cancel.recycle(); }
+            return true;
+        });
+    }
+
     interface ItemAction { void open(JellyfinApi.Item item); }
 
-    HorizontalScrollView rail(List<JellyfinApi.Item> items, boolean wide, boolean progress, int gutter,
-                              ItemAction action) {
-        HorizontalScrollView scroll = new HorizontalScrollView(context);
-        scroll.setHorizontalScrollBarEnabled(false);
-        scroll.setClipToPadding(false);
-        LinearLayout row = new LinearLayout(context);
-        row.setPadding(gutter, dp(3), gutter, dp(6));
-        int screenDp = context.getResources().getConfiguration().screenWidthDp;
-        int width = progress ? Math.max(223, Math.min(282, Math.round(screenDp * 0.68f)))
-                : wide ? Math.max(143, Math.min(178, Math.round(screenDp * 0.45f)))
-                : Math.max(100, Math.min(117, Math.round(screenDp * 0.28f)));
-        scroll.addView(row, new FrameLayout.LayoutParams(-2, -2));
+    LinearLayout homeList(List<JellyfinApi.Item> items, boolean progress, int width, ItemAction details, ItemAction play) {
+        LinearLayout list = column();
         for (int i = 0; i < items.size(); i++) {
             JellyfinApi.Item item = items.get(i);
-            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(width), -2);
-            if (i > 0) params.setMarginStart(dp(12));
-            row.addView(card(item, wide, progress, true, dp(width), () -> action.open(item)), params);
+            LinearLayout.LayoutParams bounds = new LinearLayout.LayoutParams(-1, -2);
+            if (i > 0) bounds.topMargin = dp(20);
+            list.addView(card(item, true, progress, true, width, () -> details.open(item), () -> play.open(item)), bounds);
         }
-        return scroll;
+        return list;
     }
 
     void grid(LinearLayout target, List<JellyfinApi.Item> items, int availableWidth, ItemAction action) {
@@ -126,8 +153,8 @@ final class LibraryUi {
 
     void appendGrid(LinearLayout target, List<JellyfinApi.Item> items, int availableWidth, int start, ItemAction action) {
         if (start >= items.size()) return;
-        int gap = dp(12);
-        int columns = availableWidth >= dp(500) ? 4 : 3;
+        int gap = dp(14);
+        int columns = availableWidth >= dp(650) ? 3 : 2;
         if (context.getResources().getConfiguration().screenWidthDp <= 355) columns = 2;
         int width = Math.max(1, (availableWidth - gap * (columns - 1)) / columns);
         LinearLayout row = start % columns == 0 ? null : (LinearLayout) target.getChildAt(target.getChildCount() - 1);
@@ -135,23 +162,24 @@ final class LibraryUi {
             if (i % columns == 0) {
                 row = new LinearLayout(context);
                 LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
-                params.bottomMargin = dp(22);
+                params.bottomMargin = dp(26);
                 target.addView(row, params);
             }
             JellyfinApi.Item item = items.get(i);
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(width, -2);
             if (i % columns > 0) params.setMarginStart(gap);
-            row.addView(card(item, false, false, false, width, () -> action.open(item)), params);
+            row.addView(card(item, false, false, false, width, () -> action.open(item), null), params);
         }
     }
 
     private View card(JellyfinApi.Item item, boolean wide, boolean progress, boolean homeCard,
-                      int width, Runnable action) {
-        int radius = progress ? RADIUS_PANEL : RADIUS_CONTROL;
+                      int width, Runnable action, Runnable playback) {
+        boolean resumeStyle = homeCard && wide;
+        int radius = resumeStyle ? RADIUS_PANEL : RADIUS_CONTROL;
         LinearLayout tile = column();
-        FrameLayout cover = picture(item, wide, progress ? 0 : radius, wide, false);
+        FrameLayout cover = picture(item, wide, resumeStyle ? 0 : radius, wide, false);
         int imageWidth = width;
-        if (progress) {
+        if (resumeStyle) {
             GradientDrawable surface = rounded(SURFACE, radius);
             surface.setStroke(dp(1), LINE);
             tile.setBackground(surface);
@@ -167,16 +195,27 @@ final class LibraryUi {
         int imageHeight = Math.max(1, imageWidth * (wide ? 9 : 24) / 16);
         tile.addView(cover, new LinearLayout.LayoutParams(-1, imageHeight));
         LinearLayout copy = tile;
-        if (progress) {
+        if (resumeStyle) {
             copy = column();
             copy.setPadding(dp(11), dp(9), dp(11), dp(11));
             tile.addView(copy);
         }
         String name = item.seriesName.isEmpty() ? item.title : item.seriesName;
-        TextView title = label(name, progress ? 16 : 14, TEXT, true);
-        title.setMaxLines(2);
+        TextView title = label(name, resumeStyle ? 24 : 22, TEXT, true);
+        if (resumeStyle) {
+            android.text.SpannableString caption = new android.text.SpannableString(name
+                    + (item.displayYear() > 0 ? "（" + item.displayYear() + "）" : ""));
+            if (caption.length() > name.length()) {
+                caption.setSpan(new android.text.style.RelativeSizeSpan(20f / 24f), name.length(), caption.length(), 0);
+                caption.setSpan(new android.text.style.ForegroundColorSpan(MUTED), name.length(), caption.length(), 0);
+                caption.setSpan(new android.text.style.StyleSpan(Typeface.NORMAL), name.length(), caption.length(), 0);
+            }
+            title.setText(caption);
+            title.setSingleLine(true);
+        }
+        title.setMaxLines(resumeStyle ? 1 : 2);
         title.setEllipsize(TextUtils.TruncateAt.END);
-        if (!progress) title.setPadding(0, dp(7), 0, 0);
+        if (!resumeStyle) title.setPadding(0, dp(7), 0, 0);
         copy.addView(title);
         boolean showSeason = item.season > 0 && (!homeCard || item.season != 1);
         String episode = (showSeason ? "第 " + item.season + " 季" : "")
@@ -188,34 +227,53 @@ final class LibraryUi {
                 ? itemType.isEmpty() ? year : year.isEmpty() ? itemType : itemType + " · " + year
                 : episodeTitle.isEmpty() ? episode
                 : episode.isEmpty() ? episodeTitle : episode + " · " + episodeTitle;
-        if (!subtitle.isEmpty()) {
-            TextView info = label(subtitle, 12, MUTED, false);
+        if (!resumeStyle && !subtitle.isEmpty()) {
+            TextView info = label(subtitle, 17, MUTED, false);
             info.setMaxLines(2);
             info.setEllipsize(TextUtils.TruncateAt.END);
             copy.addView(info);
         }
-        if (progress) {
+        if (resumeStyle) {
             View shade = new View(context);
             shade.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
                     new int[] { Color.TRANSPARENT, 0xe805090c }));
-            cover.addView(shade, new FrameLayout.LayoutParams(-1, Math.round(imageHeight * 0.57f), Gravity.BOTTOM));
-            if (item.durationMs > 0) positionBar(cover, item.resumeMs, item.durationMs);
+            cover.addView(shade, new FrameLayout.LayoutParams(-1, Math.round(imageHeight * 0.8f), Gravity.BOTTOM));
+            if (progress && item.durationMs > 0) positionBar(cover, item.resumeMs, item.durationMs);
             String watchTime = time(item.resumeMs) + (item.durationMs > 0 ? " / " + time(item.durationMs) : "");
-            TextView elapsed = label(watchTime, 11, TEXT, false);
+            if (progress) {
+            TextView elapsed = label(watchTime, 17, TEXT, false);
             elapsed.setSingleLine(true);
             elapsed.setEllipsize(TextUtils.TruncateAt.END);
             elapsed.setFontFeatureSettings("'tnum'");
             elapsed.setShadowLayer(dp(2), 0, dp(1), 0xcc000000);
             FrameLayout.LayoutParams timeBounds = new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM | Gravity.START);
-            timeBounds.setMarginStart(dp(10));
-            timeBounds.setMarginEnd(dp(54));
-            timeBounds.bottomMargin = dp(16);
+            timeBounds.setMarginStart(dp(12));
+            timeBounds.setMarginEnd(dp(68));
+            timeBounds.bottomMargin = dp(20);
             cover.addView(elapsed, timeBounds);
-            addResumeIcon(cover);
-            tile.setContentDescription("继续观看 " + name + (subtitle.isEmpty() ? "" : "，" + subtitle)
-                    + "，已观看 " + watchTime);
+            }
+            if (!item.seriesName.isEmpty() && item.index > 0) {
+                TextView episodeLabel = label((item.season > 1 ? "第" + item.season + "季 " : "")
+                        + "第" + item.index + "集", 20, TEXT, true);
+                episodeLabel.setSingleLine(true);
+                episodeLabel.setEllipsize(TextUtils.TruncateAt.END);
+                episodeLabel.setShadowLayer(dp(2), 0, dp(1), 0xcc000000);
+                FrameLayout.LayoutParams episodeBounds = new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM | Gravity.START);
+                episodeBounds.setMargins(dp(12), 0, dp(68), dp(progress ? 54 : 22));
+                cover.addView(episodeLabel, episodeBounds);
+            }
+            TextView type = label(item.series || !item.seriesName.isEmpty() ? "剧集" : "电影", 18, TEXT, false);
+            type.setPadding(dp(9), dp(3), dp(9), dp(3));
+            type.setBackground(rounded(0xb0101010, RADIUS_SMALL));
+            FrameLayout.LayoutParams typeBounds = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.END);
+            typeBounds.setMargins(dp(12), dp(12), dp(12), 0);
+            cover.addView(type, typeBounds);
+            addResumeIcon(cover, progress ? "继续观看 " + name : "播放 " + name, playback);
+            tile.setContentDescription("查看详情 " + name
+                    + (subtitle.isEmpty() ? "" : "，" + subtitle)
+                    + (progress ? "，已观看 " + watchTime : ""));
         }
-        actionable(tile, action);
+        scrollActionable(tile, action);
         return tile;
     }
 
@@ -282,22 +340,26 @@ final class LibraryUi {
         return poster;
     }
 
-    private void addResumeIcon(FrameLayout cover) {
+    private void addResumeIcon(FrameLayout cover, String description, Runnable action) {
+        FrameLayout hit = new FrameLayout(context);
+        hit.setContentDescription(description);
         ImageView play = new ImageView(context);
         play.setImageResource(R.drawable.ic_quick_play);
         play.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        GradientDrawable badge = rounded(0x80101010, 17);
+        GradientDrawable badge = rounded(0x80101010, 22);
         badge.setStroke(dp(1), 0x38ffffff);
         play.setBackground(badge);
-        FrameLayout.LayoutParams bounds = new FrameLayout.LayoutParams(dp(34), dp(34), Gravity.BOTTOM | Gravity.END);
-        bounds.setMarginEnd(dp(10));
-        bounds.bottomMargin = dp(15);
-        cover.addView(play, bounds);
+        hit.addView(play, new FrameLayout.LayoutParams(dp(44), dp(44), Gravity.CENTER));
+        FrameLayout.LayoutParams bounds = new FrameLayout.LayoutParams(dp(56), dp(56), Gravity.BOTTOM | Gravity.END);
+        bounds.setMarginEnd(dp(6));
+        bounds.bottomMargin = dp(14);
+        cover.addView(hit, bounds);
+        scrollActionable(hit, action);
     }
 
     private void positionBar(FrameLayout frame, long position, long duration) {
-        FrameLayout.LayoutParams bounds = new FrameLayout.LayoutParams(-1, dp(4), Gravity.BOTTOM);
-        bounds.setMargins(dp(10), 0, dp(10), dp(7));
+        FrameLayout.LayoutParams bounds = new FrameLayout.LayoutParams(-1, dp(6), Gravity.BOTTOM);
+        bounds.setMargins(dp(12), 0, dp(12), dp(9));
         ProgressBar bar = watchProgress(position, duration);
         bar.setProgressBackgroundTintList(ColorStateList.valueOf(0x60ffffff));
         frame.addView(bar, bounds);

@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>z-jellyfin · 大字版设计预览</title>
+<link rel="icon" href="../app-icon.png">
+<link rel="stylesheet" href="large-type.css">
+</head>
+<body>
+<div class="desktop">
+ <aside class="notes" aria-label="原型导航">
+  <div class="reviewIdentity">
+   <img src="../logo.png" alt="" width="68" height="68">
+   <h1>z-jellyfin<span>大字版设计</span></h1><p class="designIntro">看得清，点得准。<br>独立设计提案 · 不影响当前 App</p>
+  </div>
+  <nav class="jumps" aria-label="直接查看页面">
+   <a class="jump" data-home-preview="resume" href="home-resume.html" target="_top">首页 · 继续观看 <span aria-hidden="true">↗</span></a>
+   <a class="jump" data-home-preview="latest" href="home-latest.html" target="_top">首页 · 最近添加 <span aria-hidden="true">↗</span></a>
+   <button class="jump" data-jump="library">媒体列表 <span aria-hidden="true">↗</span></button>
+   <button class="jump" data-jump="detail">剧集详情 <span aria-hidden="true">↗</span></button>
+   <button class="jump" data-jump="player">全屏播放器 <span aria-hidden="true">↗</span></button>
+   <button class="jump" data-jump="settings">连接设置 <span aria-hidden="true">↗</span></button>
+   <button class="jump" data-jump="splash">开屏 <span aria-hidden="true">↗</span></button>
+  </nav>
+ </aside>
+ <div class="shell" aria-label="z-jellyfin 手机界面">
+  <header class="top"></header>
+  <main></main>
+  <nav class="bottom" aria-label="主导航"></nav>
+  <dialog class="confirmDialog" id="settings-dialog" aria-labelledby="confirm-title">
+   <form id="confirmation-form">
+    <h2 id="confirm-title">确认保存设置</h2>
+    <label class="field">确认密码<input name="confirmation" type="password" autocomplete="off" aria-describedby="confirm-error" autofocus></label>
+    <p class="confirmError" id="confirm-error" aria-live="polite"></p>
+    <div class="actions">
+     <button class="secondary" id="cancel-settings" type="button">取消</button>
+     <button class="primary" type="submit">确认保存</button>
+    </div>
+   </form>
+  </dialog>
+ </div>
+</div>
+<script src="prototype.js"></script>
+<script src="../rail-drag.js"></script>
+</body>
+</html>
