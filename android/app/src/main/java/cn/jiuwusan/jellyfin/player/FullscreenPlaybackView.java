@@ -104,6 +104,7 @@ final class FullscreenPlaybackView extends FrameLayout {
         video.setUseController(false);
         video.setResizeMode(AspectRatioFrameLayout.RESIZE_MODE_FIT);
         video.setKeepScreenOn(true);
+        SubtitleStyle.apply(video.getSubtitleView());
         addView(video, new LayoutParams(-1, -1));
 
         preparationCover = new FrameLayout(context);
@@ -698,7 +699,8 @@ final class FullscreenPlaybackView extends FrameLayout {
     private void updateCaptionCues() {
         SubtitleView captions = video.getSubtitleView();
         if (captions == null || player == null || !player.isCommandAvailable(Player.COMMAND_GET_TEXT)) return;
-        List<Cue> original = player.getCurrentCues().cues;
+        List<Cue> original = new ArrayList<>();
+        for (Cue cue : player.getCurrentCues().cues) original.add(SubtitleStyle.withoutBackground(cue));
         int fullHeight = captions.getHeight();
         int availableHeight = fullHeight - captions.getPaddingBottom();
         if (original.isEmpty() || availableHeight <= 0 || availableHeight == fullHeight) {

@@ -8,8 +8,8 @@ android {
         minSdk = 23
         targetSdk = 35
         testInstrumentationRunner = "cn.jiuwusan.jellyfin.player.LoadingTransitionCheck"
-        versionCode = 51
-        versionName = "0.6.37"
+        versionCode = 52
+        versionName = "0.6.38"
     }
 }
 

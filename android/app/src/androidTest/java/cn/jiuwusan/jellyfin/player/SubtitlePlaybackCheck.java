@@ -157,7 +157,29 @@ final class SubtitlePlaybackCheck {
                 SystemClock.sleep(100);
             }
             check(cues.get(), "Client text subtitle produced no cues");
+            ui(() -> ((ExoPlayer) field(activity, "player")).pause());
+            frame(null); // A cue can arrive before the replacement video's first frame.
+            ui(() -> {
+                Object screen = field(field(activity, "playback"), "screen");
+                androidx.media3.ui.SubtitleView captions = ((androidx.media3.ui.PlayerView) field(screen, "video")).getSubtitleView();
+                androidx.media3.ui.CaptionStyleCompat style = (androidx.media3.ui.CaptionStyleCompat) field(captions, "style");
+                check(style.backgroundColor == android.graphics.Color.TRANSPARENT && style.windowColor == android.graphics.Color.TRANSPARENT
+                        && style.edgeType == androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_OUTLINE && style.edgeColor == android.graphics.Color.BLACK,
+                        "Real fullscreen caption style retained background or lost outline");
+                java.util.List<?> displayed = (java.util.List<?>) field(captions, "cues");
+                check(!displayed.isEmpty(), "No displayed caption after first frame");
+                for (Object value : displayed) {
+                    androidx.media3.common.text.Cue cue = (androidx.media3.common.text.Cue) value;
+                    check(!cue.windowColorSet, "Real caption has a window background");
+                    if (cue.text instanceof android.text.Spanned) {
+                        android.text.Spanned text = (android.text.Spanned) cue.text;
+                        check(text.getSpans(0, text.length(), android.text.style.BackgroundColorSpan.class).length == 0, "Real caption has a text background");
+                    }
+                }
+            });
             shot("client-text");
+            ui(() -> invoke(field(field(activity, "playback"), "screen"), "setControlsVisible", new Class<?>[]{boolean.class}, false));
+            SystemClock.sleep(300); shot("client-text-hidden");
             ui(() -> activity.onBackPressed()); SystemClock.sleep(1000);
             check(saved.equals(activity.getSharedPreferences("connection", 0).getString("sealed", null)), "Settings changed");
             result.putString("decoder", decoder);

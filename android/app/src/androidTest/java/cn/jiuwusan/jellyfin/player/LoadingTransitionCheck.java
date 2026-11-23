@@ -57,6 +57,7 @@ public final class LoadingTransitionCheck extends Instrumentation {
         if (failure.get() != null) throw new AssertionError(failure.get());
     }
     @Override public void onStart() {
+        if ("subtitle-style".equals(collectionSuite)) { new SubtitleStyleCheck(this).run(); return; }
         if ("subtitle-cache".equals(collectionSuite)) { new SubtitleCacheCheck(this).run(); return; }
         if ("subtitle-compat".equals(collectionSuite)) { new SubtitleCompatibilityCheck(this).run(); return; }
         if ("subtitle-compat-supported".equals(collectionSuite)) { new SubtitleCompatibilityCheck(this).run(false); return; }
