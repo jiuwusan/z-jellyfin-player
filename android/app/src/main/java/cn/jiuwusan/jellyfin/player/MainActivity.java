@@ -648,6 +648,11 @@ public final class MainActivity extends Activity {
     }
 
     private void showCatalog(LinearLayout view, LibraryCatalog catalog) {
+        if (catalog.tabs.isEmpty()) {
+            LoadingUi.empty(view, libraryUi, "暂无可见媒体库", "请确认当前账号的媒体库访问权限。");
+            return;
+        }
+        if (catalog.selected == null) catalog.selected = catalog.tabs.get(0);
         ScrollView content = (ScrollView) view.getParent();
         LinearLayout root = (LinearLayout) content.getParent();
         HorizontalScrollView tabs = new HorizontalScrollView(this);
@@ -658,7 +663,7 @@ public final class MainActivity extends Activity {
         root.addView(tabs, root.indexOfChild(content), new LinearLayout.LayoutParams(-1, -2));
         view.setPadding(contentGutter(), 0, contentGutter(), dp(24));
         for (LibraryLocation location : catalog.tabs) {
-            TextView chip = addLibraryTab(row, location.folder == null ? "全部" : location.folder.title,
+            TextView chip = addLibraryTab(row, location.folder.title,
                     location == catalog.selected);
             libraryUi.actionable(chip, () -> {
                 if (location == catalog.selected) return;
@@ -677,10 +682,9 @@ public final class MainActivity extends Activity {
 
     private static final class LibraryCatalog {
         final List<LibraryLocation> tabs = new ArrayList<>();
-        LibraryLocation selected = new LibraryLocation(null, true);
+        LibraryLocation selected;
         int tabScrollX;
 
-        LibraryCatalog() { tabs.add(selected); }
     }
 
     private static final class LibraryLocation {

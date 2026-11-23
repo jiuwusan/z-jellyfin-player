@@ -98,6 +98,7 @@ final class CollectionsUiCheck {
             }
             ui(() -> invoke("librariesPage"));
             waitText(movies.title);
+            ui(() -> check(text(root(), "全部") == null, "Removed all-media tab is still present"));
             String movieTitle = movies.title;
             ui(() -> text(root(), movieTitle).performClick());
             for (String prefix : new String[]{"速度与激情", "人类清除计划"}) {
