@@ -23,9 +23,16 @@ final class ConnectionSettings {
     final String user;
     final String password;
     final int resolution, bitrate;
+    final String audioLanguage, subtitleLanguage;
 
     ConnectionSettings(String server, String host, int port, String proxyUser, String proxyPassword,
                        String user, String password, int resolution, int bitrate) {
+        this(server, host, port, proxyUser, proxyPassword, user, password, resolution, bitrate,
+                LanguagePreferences.DEFAULT, LanguagePreferences.DEFAULT);
+    }
+
+    ConnectionSettings(String server, String host, int port, String proxyUser, String proxyPassword,
+                       String user, String password, int resolution, int bitrate, String audioLanguage, String subtitleLanguage) {
         this.server = HttpUrl.parse(server.trim().replaceAll("/+$", "") + "/");
         if (this.server == null || !this.server.username().isEmpty() || !this.server.password().isEmpty()
                 || this.server.query() != null || this.server.fragment() != null) {
@@ -42,12 +49,12 @@ final class ConnectionSettings {
         this.password = password;
         this.resolution = PlaybackPolicy.WIDTHS[PlaybackPolicy.optionIndex(PlaybackPolicy.WIDTHS, resolution, PlaybackPolicy.WIDTH)];
         this.bitrate = PlaybackPolicy.RATES[PlaybackPolicy.optionIndex(PlaybackPolicy.RATES, bitrate, PlaybackPolicy.TOTAL_BPS)];
+        this.audioLanguage = audioLanguage == null ? LanguagePreferences.DEFAULT : audioLanguage.trim();
+        this.subtitleLanguage = subtitleLanguage == null ? LanguagePreferences.DEFAULT : subtitleLanguage.trim();
     }
 
     void save(Context ctx) throws Exception {
-        JSONObject value = new JSONObject().put("server", server.toString()).put("host", host)
-                .put("port", port).put("proxyUser", proxyUser).put("proxyPassword", proxyPassword)
-                .put("user", user).put("password", password).put("resolution", resolution).put("bitrate", bitrate);
+        JSONObject value = toJson();
         Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
         cipher.init(Cipher.ENCRYPT_MODE, key(true));
         String encoded = Base64.encodeToString(cipher.getIV(), Base64.NO_WRAP) + "."
@@ -66,9 +73,21 @@ final class ConnectionSettings {
                 new GCMParameterSpec(128, Base64.decode(values[0], Base64.DEFAULT)));
         JSONObject data = new JSONObject(new String(cipher.doFinal(
                 Base64.decode(values[1], Base64.DEFAULT)), StandardCharsets.UTF_8));
+        return fromJson(data);
+    }
+
+    JSONObject toJson() throws Exception {
+        return new JSONObject().put("server", server.toString()).put("host", host)
+                .put("port", port).put("proxyUser", proxyUser).put("proxyPassword", proxyPassword)
+                .put("user", user).put("password", password).put("resolution", resolution).put("bitrate", bitrate)
+                .put("audioLanguage", audioLanguage).put("subtitleLanguage", subtitleLanguage);
+    }
+
+    static ConnectionSettings fromJson(JSONObject data) throws Exception {
         return new ConnectionSettings(data.getString("server"), data.getString("host"), data.getInt("port"),
                 data.getString("proxyUser"), data.getString("proxyPassword"), data.getString("user"), data.getString("password"),
-                data.optInt("resolution", PlaybackPolicy.WIDTH), data.optInt("bitrate", PlaybackPolicy.TOTAL_BPS));
+                data.optInt("resolution", PlaybackPolicy.WIDTH), data.optInt("bitrate", PlaybackPolicy.TOTAL_BPS),
+                data.optString("audioLanguage", LanguagePreferences.DEFAULT), data.optString("subtitleLanguage", LanguagePreferences.DEFAULT));
     }
 
     private static SecretKey key(boolean create) throws Exception {

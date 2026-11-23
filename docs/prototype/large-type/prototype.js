@@ -33,7 +33,8 @@ const bitrates=[["0","自动"],
  ...[120,80,60,40,20,15,10,8,6,4,3,1.5].map(value=>[String(value*1_000_000),value+" Mbps"]),
  ["720000","720 kbps"],["420000","420 kbps"]];
 const settingsConfirmation="jellyfin";
-const initialSettings={host:"proxy.example.net",port:"8080",proxyUser:"family",proxyPass:"prototype",server:"https://media.example.net/jellyfin",user:"家庭账号",pass:"prototype",resolution:"1920",bitrate:"4000000"};
+const languages=[["zho","Chinese"],["eng","English"],["jpn","Japanese"],["kor","Korean"],["fra","French"],["deu","German"],["spa","Spanish"],["","不指定（沿用服务端）"]];
+const initialSettings={host:"proxy.example.net",port:"8080",proxyUser:"family",proxyPass:"prototype",server:"https://media.example.net/jellyfin",user:"家庭账号",pass:"prototype",resolution:"1920",bitrate:"4000000",audioLanguage:"zho",subtitleLanguage:"zho"};
 let saved={...initialSettings};
 let pendingSettings=null;
 const previewParams=new URLSearchParams(location.search);
@@ -182,6 +183,7 @@ function settings(){
  '<section class="settingsGroup"><h2>Jellyfin 授权</h2>'+fields("服务器地址","server","url")+fields("Jellyfin 账号","user")+fields("Jellyfin 密码","pass","password")+'</section>'+
  '<section class="settingsGroup"><h2>播放画质</h2><div class="qualityFields">'+choices("分辨率上限","resolution",resolutions)+
  choices("码率上限（音视频合计）","bitrate",bitrates)+'</div></section>'+
+ '<section class="settingsGroup"><h2>播放语言</h2>'+choices("首选的音频语言","audioLanguage",languages)+choices("字幕语言偏好","subtitleLanguage",languages)+'<p class="helper">读取并保存当前 Jellyfin 账号偏好，对同账号其他客户端也生效。自动选轨由 Jellyfin 决定。</p></section>'+
  '<div class="settingsFooter"><button class="primary full" type="submit">保存并连接</button><div class="helper" id="settings-message" aria-live="polite"></div></div></form></div>';
 }
 function searchResults(term){

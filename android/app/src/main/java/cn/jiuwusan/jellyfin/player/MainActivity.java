@@ -73,6 +73,7 @@ public final class MainActivity extends Activity {
     private final LibraryUi libraryUi = new LibraryUi(this, ui);
     private ConnectionSettings settings;
     private ConnectionSettings draft;
+    private boolean draftSaveLanguages;
     private JellyfinApi api;
     private JellyfinApi.Stream stream;
     private ExoPlayer player;
@@ -292,15 +293,64 @@ public final class MainActivity extends Activity {
                 PlaybackPolicy.optionIndex(PlaybackPolicy.WIDTHS, old == null ? PlaybackPolicy.WIDTH : old.resolution, PlaybackPolicy.WIDTH));
         Spinner bitrate = qualityField(qualities, "码率上限（音视频合计）", PlaybackPolicy.RATE_LABELS,
                 PlaybackPolicy.optionIndex(PlaybackPolicy.RATES, old == null ? PlaybackPolicy.TOTAL_BPS : old.bitrate, PlaybackPolicy.TOTAL_BPS));
+        settingsSection(view, "播放语言");
+        Spinner audioLanguage = qualityField(view, "首选的音频语言", LanguagePreferences.LABELS,
+                LanguagePreferences.optionIndex(old == null ? LanguagePreferences.DEFAULT : old.audioLanguage));
+        Spinner subtitleLanguage = qualityField(view, "字幕语言偏好", LanguagePreferences.LABELS,
+                LanguagePreferences.optionIndex(old == null ? LanguagePreferences.DEFAULT : old.subtitleLanguage));
+        String[] accountLanguages = { old == null ? LanguagePreferences.DEFAULT : old.audioLanguage,
+                old == null ? LanguagePreferences.DEFAULT : old.subtitleLanguage };
+        String[][] languageCodes = { languageOptions(audioLanguage, accountLanguages[0]),
+                languageOptions(subtitleLanguage, accountLanguages[1]) };
+        int[] accountSelections = { audioLanguage.getSelectedItemPosition(), subtitleLanguage.getSelectedItemPosition() };
+        boolean readAccountLanguages = api != null && draft == null;
+        java.util.concurrent.atomic.AtomicBoolean languagesReady = new java.util.concurrent.atomic.AtomicBoolean(
+                !readAccountLanguages && (draft != null ? draftSaveLanguages : settings == null));
+        TextView languageNotice = text(view, "语言偏好保存到当前 Jellyfin 账号，对同账号其他客户端也生效。");
+        if (!languagesReady.get()) {
+            audioLanguage.setEnabled(false);
+            subtitleLanguage.setEnabled(false);
+        }
+        if (readAccountLanguages) {
+            languageNotice.setText("正在读取账号语言偏好…");
+            int expected = page;
+            JellyfinApi connection = api;
+            browse.execute(() -> {
+                try {
+                    String[] preferences = connection.languagePreferences();
+                    onPage(expected, () -> {
+                        for (int i = 0; i < 2; i++) {
+                            accountLanguages[i] = preferences[i];
+                        }
+                        languageCodes[0] = languageOptions(audioLanguage, preferences[0]);
+                        languageCodes[1] = languageOptions(subtitleLanguage, preferences[1]);
+                        accountSelections[0] = audioLanguage.getSelectedItemPosition();
+                        accountSelections[1] = subtitleLanguage.getSelectedItemPosition();
+                        audioLanguage.setSelection(accountSelections[0]);
+                        subtitleLanguage.setSelection(accountSelections[1]);
+                        audioLanguage.setEnabled(true);
+                        subtitleLanguage.setEnabled(true);
+                        languagesReady.set(true);
+                        languageNotice.setText("语言偏好保存到当前 Jellyfin 账号，对同账号其他客户端也生效。");
+                    });
+                } catch (Exception error) {
+                    onPage(expected, () -> languageNotice.setText("未能读取账号语言偏好。重新进入设置可重试，本次保存只更新连接和画质。"));
+                }
+            });
+        } else if (!languagesReady.get()) {
+            languageNotice.setText("连接成功后重新进入设置读取账号语言偏好，本次保存只更新连接和画质。");
+        }
         TextView notice = text(view, message);
         notice.setVisibility(message.isEmpty() ? View.GONE : View.VISIBLE);
         actionButton(view, "保存并连接", true, () -> {
             try {
                 ConnectionSettings candidate = new ConnectionSettings(value(server), value(host), Integer.parseInt(value(port)),
                         value(proxyUser), value(proxyPassword), value(username), value(password),
-                        PlaybackPolicy.WIDTHS[resolution.getSelectedItemPosition()], PlaybackPolicy.RATES[bitrate.getSelectedItemPosition()]);
-                if (settings == null) connect(candidate, true);
-                else confirmSettings(candidate);
+                        PlaybackPolicy.WIDTHS[resolution.getSelectedItemPosition()], PlaybackPolicy.RATES[bitrate.getSelectedItemPosition()],
+                        audioLanguage.getSelectedItemPosition() == accountSelections[0] ? accountLanguages[0] : languageCodes[0][audioLanguage.getSelectedItemPosition()],
+                        subtitleLanguage.getSelectedItemPosition() == accountSelections[1] ? accountLanguages[1] : languageCodes[1][subtitleLanguage.getSelectedItemPosition()]);
+                if (settings == null) connect(candidate, true, 0, languagesReady.get());
+                else confirmSettings(candidate, languagesReady.get());
             } catch (IllegalArgumentException error) {
                 notice.setText("请检查服务器地址、代理端口和账号。");
                 notice.setVisibility(View.VISIBLE);
@@ -341,7 +391,8 @@ public final class MainActivity extends Activity {
                 : new LinearLayout.LayoutParams(0, -2, 1));
         text(group, title).setTextSize(20);
         Spinner spinner = new Spinner(this, Spinner.MODE_DROPDOWN);
-        ArrayAdapter<String> adapter = new ArrayAdapter<String>(this, android.R.layout.simple_spinner_item, options) {
+        ArrayAdapter<String> adapter = new ArrayAdapter<String>(this, android.R.layout.simple_spinner_item,
+                new ArrayList<>(java.util.Arrays.asList(options))) {
             private View readable(View view) {
                 TextView label = (TextView) view;
                 label.setTextSize(22);
@@ -367,7 +418,28 @@ public final class MainActivity extends Activity {
         return spinner;
     }
 
-    private void confirmSettings(ConnectionSettings candidate) {
+    @SuppressWarnings("unchecked")
+    private String[] languageOptions(Spinner spinner, String language) {
+        String normalized = LanguagePreferences.normalize(language);
+        String[] codes = LanguagePreferences.CODES;
+        String[] labels = LanguagePreferences.LABELS;
+        int selected = -1;
+        for (int i = 0; i < codes.length; i++) if (codes[i].equals(normalized)) { selected = i; break; }
+        if (selected < 0) {
+            selected = codes.length;
+            codes = java.util.Arrays.copyOf(codes, selected + 1);
+            labels = java.util.Arrays.copyOf(labels, selected + 1);
+            codes[selected] = language;
+            labels[selected] = language + "（账号设置）";
+        }
+        ArrayAdapter<String> adapter = (ArrayAdapter<String>) spinner.getAdapter();
+        adapter.clear();
+        adapter.addAll(labels);
+        spinner.setSelection(selected);
+        return codes;
+    }
+
+    private void confirmSettings(ConnectionSettings candidate, boolean saveLanguages) {
         LinearLayout body = column();
         body.setPadding(dp(21), dp(21), dp(21), dp(21));
         GradientDrawable backdrop = libraryUi.rounded(LibraryUi.PANEL, LibraryUi.RADIUS_PANEL);
@@ -392,7 +464,7 @@ public final class MainActivity extends Activity {
                 return;
             }
             dialog.dismiss();
-            connect(candidate, true);
+            connect(candidate, true, 0, saveLanguages);
         };
         actionRow(body, "取消", dialog::dismiss, "确认保存", submit);
         confirmation.setImeOptions(EditorInfo.IME_ACTION_DONE);
@@ -428,6 +500,10 @@ public final class MainActivity extends Activity {
     }
 
     private void connect(ConnectionSettings candidate, boolean save, long splashReadyAt) {
+        connect(candidate, save, splashReadyAt, save);
+    }
+
+    private void connect(ConnectionSettings candidate, boolean save, long splashReadyAt, boolean saveLanguages) {
         if (splashReadyAt == 0) {
             LinearLayout view = panel("正在连接 Jellyfin", false, () -> settingsPage(""));
             text(view, "通过家庭 HTTP 代理连接。");
@@ -438,6 +514,7 @@ public final class MainActivity extends Activity {
             try {
                 JellyfinApi connected = new JellyfinApi(candidate, device);
                 connected.login();
+                if (save && saveLanguages) connected.saveLanguagePreferences(candidate.audioLanguage, candidate.subtitleLanguage);
                 if (save) candidate.save(this);
                 afterSplash(expected, splashReadyAt, () -> {
                     settings = candidate;
@@ -450,7 +527,8 @@ public final class MainActivity extends Activity {
             } catch (Exception error) {
                 afterSplash(expected, splashReadyAt, () -> {
                     draft = candidate;
-                    connectionFailed(candidate, save, error);
+                    draftSaveLanguages = saveLanguages;
+                    connectionFailed(candidate, save, saveLanguages, error);
                 });
             }
         });
@@ -462,10 +540,10 @@ public final class MainActivity extends Activity {
         }, Math.max(SystemClock.uptimeMillis(), readyAt));
     }
 
-    private void connectionFailed(ConnectionSettings candidate, boolean save, Exception error) {
+    private void connectionFailed(ConnectionSettings candidate, boolean save, boolean saveLanguages, Exception error) {
         LinearLayout view = panel("连接失败", false, () -> settingsPage(""));
         text(view, message(error, "连接失败"));
-        button(view, "重试连接", () -> connect(candidate, save));
+        button(view, "重试连接", () -> connect(candidate, save, 0, saveLanguages));
         button(view, "连接设置", () -> settingsPage(""));
     }
 

@@ -78,10 +78,14 @@ final class SubtitleHandlingCheck {
             result.putString("failure", android.util.Log.getStackTraceString(e)); test.finish(Activity.RESULT_CANCELED, result);
         }
     }
-    private static final class Fixture implements AutoCloseable {
+    static final class Fixture implements AutoCloseable {
         final ServerSocket server = new ServerSocket(0, 10, java.net.InetAddress.getByName("127.0.0.1"));
         final List<JSONObject> bodies = java.util.Collections.synchronizedList(new ArrayList<>());
         volatile boolean running = true;
+        volatile boolean languageScenario;
+        volatile int configurationWrites;
+        volatile boolean failConfigurationRead, rejectConfigurationWrite;
+        volatile JSONObject configuration = new JSONObject("{\"AudioLanguagePreference\":\"eng\",\"SubtitleLanguagePreference\":\"eng\",\"SubtitleMode\":\"None\",\"RememberSubtitleSelections\":true,\"PlayDefaultAudioTrack\":true,\"OtherSetting\":42}");
         Fixture() throws Exception {
             Thread worker = new Thread(() -> {
                 while (running) try (Socket socket = server.accept()) {
@@ -92,21 +96,28 @@ final class SubtitleHandlingCheck {
                     StringBuilder body = new StringBuilder(); for (int i = 0; i < size; i++) body.append((char) in.read());
                     JSONObject request = size == 0 ? new JSONObject() : new JSONObject(body.toString());
                     String response;
+                    String status = "200 OK";
                     if (first.contains("AuthenticateByName")) response = "{\"AccessToken\":\"fixture\",\"User\":{\"Id\":\"fixture\"}}";
+                    else if (first.startsWith("POST ") && first.contains("/Users/Configuration?userId=fixture")) {
+                        if (rejectConfigurationWrite) status = "403 Forbidden";
+                        else { configuration = request; configurationWrites++; }
+                        response = "{}";
+                    }
+                    else if (first.startsWith("GET ") && first.contains("/Users/fixture ")) response = failConfigurationRead ? "{}" : new JSONObject().put("Configuration", configuration).toString();
                     else { bodies.add(request); response = playback(request).toString(); }
                     byte[] data = response.getBytes(StandardCharsets.UTF_8);
-                    socket.getOutputStream().write(("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: " + data.length + "\r\nConnection: close\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
+                    socket.getOutputStream().write(("HTTP/1.1 " + status + "\r\nContent-Type: application/json\r\nContent-Length: " + data.length + "\r\nConnection: close\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
                     socket.getOutputStream().write(data);
                 } catch (Exception e) { if (running) throw new RuntimeException(e); }
             }, "subtitle-api-fixture"); worker.setDaemon(true); worker.start();
         }
         JSONObject last() { return bodies.get(bodies.size() - 1); }
         JSONObject playback(JSONObject request) throws Exception {
-            int subtitle = request.optInt("SubtitleStreamIndex", 4), audio = request.optInt("AudioStreamIndex", 1);
+            int subtitle = request.optInt("SubtitleStreamIndex", languageScenario ? ("None".equals(configuration.optString("SubtitleMode")) ? -1 : 5) : 4), audio = request.optInt("AudioStreamIndex", 1);
             JSONArray tracks = new JSONArray().put(new JSONObject().put("Type", "Video").put("Index", 0).put("Codec", "hevc").put("Width", 1920).put("Height", 800))
-                    .put(new JSONObject().put("Type", "Audio").put("Index", 1).put("Codec", "aac"))
-                    .put(new JSONObject().put("Type", "Audio").put("Index", 2).put("Codec", "aac"))
-                    .put(new JSONObject().put("Type", "Subtitle").put("Index", 4).put("Codec", "PGSSUB").put("IsTextSubtitleStream", false).put("Language", "zho").put("IsDefault", true))
+                    .put(new JSONObject().put("Type", "Audio").put("Index", 1).put("Codec", "aac").put("Language", languageScenario ? "eng" : ""))
+                    .put(new JSONObject().put("Type", "Audio").put("Index", 2).put("Codec", "aac").put("Language", languageScenario ? "chi" : ""))
+                    .put(new JSONObject().put("Type", "Subtitle").put("Index", 4).put("Codec", "PGSSUB").put("IsTextSubtitleStream", false).put("Language", languageScenario ? "zh-Hant" : "zho").put("IsDefault", !languageScenario))
                     .put(new JSONObject().put("Type", "Subtitle").put("Index", 5).put("Codec", "subrip").put("IsTextSubtitleStream", true).put("Language", "eng").put("IsExternal", true));
             JSONObject source = new JSONObject().put("Id", "source").put("Bitrate", 18_000_000).put("MediaStreams", tracks)
                     .put("SupportsDirectPlay", true).put("SupportsDirectStream", true).put("SupportsTranscoding", true)

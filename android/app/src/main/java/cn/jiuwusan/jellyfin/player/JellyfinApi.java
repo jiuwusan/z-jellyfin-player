@@ -61,6 +61,28 @@ final class JellyfinApi {
         Log.i(TAG, "Login successful");
     }
 
+    private JSONObject userConfiguration() throws Exception {
+        JSONObject user = json("读取账号偏好", url("Users/" + userId).build(), null);
+        JSONObject configuration = user.optJSONObject("Configuration");
+        if (configuration == null) throw new IOException("无法读取账号语言偏好");
+        return configuration;
+    }
+
+    String[] languagePreferences() throws Exception {
+        JSONObject configuration = userConfiguration();
+        return new String[] { configuration.optString("AudioLanguagePreference", ""),
+                configuration.optString("SubtitleLanguagePreference", "") };
+    }
+
+    void saveLanguagePreferences(String audio, String subtitles) throws Exception {
+        // Fetch the latest complete object so unrelated and newly introduced settings survive the update.
+        JSONObject configuration = userConfiguration();
+        if (audio.equals(configuration.optString("AudioLanguagePreference", ""))
+                && subtitles.equals(configuration.optString("SubtitleLanguagePreference", ""))) return;
+        configuration.put("AudioLanguagePreference", audio).put("SubtitleLanguagePreference", subtitles);
+        json("保存账号语言偏好", url("Users/Configuration").addQueryParameter("userId", userId).build(), configuration);
+    }
+
     List<Item> search(String query) throws Exception {
         JSONArray items = json("搜索", url("Items").addQueryParameter("userId", userId)
                 .addQueryParameter("Recursive", "true").addQueryParameter("IncludeItemTypes", "Movie,Episode,Video,Series")
