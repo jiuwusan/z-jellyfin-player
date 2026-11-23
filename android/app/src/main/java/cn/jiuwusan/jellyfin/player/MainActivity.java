@@ -1450,8 +1450,7 @@ public final class MainActivity extends Activity {
                         retryPosition = resolvedPosition;
                         screen.setPreparationPosition(resolvedPosition);
                     });
-                    JellyfinApi.Stream resolved = retrySource == null ? connection.stream(item, policy)
-                            : connection.stream(item, policy, retrySource, retryAudio);
+                    JellyfinApi.Stream resolved = connection.stream(item, policy, retrySource, retryAudio, subtitle);
                     onPage(expected, () -> {
                         if (playback != this || preparationRequest != request) return;
                         startPlayback(resolved, this, resolvedPosition, true, false, retryParameters);
@@ -1554,24 +1553,38 @@ public final class MainActivity extends Activity {
             List<PlaybackTracks.LocalTrack> localOptions = embedded;
             screen.showChoices("字幕", labels.toArray(new String[0]), selected, which -> {
                 if (!ready() || stream != current) return;
-                localSubtitle = null;
-                if (which == 0) subtitle = PlaybackTracks.AUTO;
-                else if (which == 1) subtitle = PlaybackTracks.OFF;
-                else if (which - 2 < current.subtitles.size()) subtitle = current.subtitles.get(which - 2).index;
+                int requested;
+                PlaybackTracks.LocalTrack local = null;
+                if (which == 0) requested = PlaybackTracks.AUTO;
+                else if (which == 1) requested = PlaybackTracks.OFF;
+                else if (which - 2 < current.subtitles.size()) requested = current.subtitles.get(which - 2).index;
                 else {
-                    subtitle = PlaybackTracks.AUTO;
-                    localSubtitle = localOptions.get(which - 2 - current.subtitles.size());
+                    requested = PlaybackTracks.AUTO;
+                    local = localOptions.get(which - 2 - current.subtitles.size());
                 }
-                loggedSubtitle = false;
-                PlaybackTracks.setSubtitle(player, player.getCurrentTracks(), current, subtitle, localSubtitle);
-                Log.i(JellyfinApi.TAG, "Subtitle selection index=" + subtitle + " local=" + (localSubtitle != null));
+                selectSubtitle(requested, local);
             });
+        }
+
+        void selectSubtitle(int requested, PlaybackTracks.LocalTrack local) {
+            if (!ready()) return;
+            int burned = local == null ? PlaybackTracks.burnInIndex(stream.subtitles, stream.defaultSubtitleIndex, requested) : -1;
+            if (burned != stream.burnedSubtitleIndex) {
+                switchTo(item, null, requested, local);
+                return;
+            }
+            subtitle = requested;
+            localSubtitle = local;
+            loggedSubtitle = false;
+            PlaybackTracks.setSubtitle(player, player.getCurrentTracks(), stream, subtitle, localSubtitle);
+            Log.i(JellyfinApi.TAG, "Subtitle selection index=" + subtitle + " local=" + (localSubtitle != null));
         }
 
         void chooseAudio() {
             if (!ready()) return;
             JellyfinApi.Stream current = stream;
-            if (current.hls) {
+            // Stable server audio indices survive switching between direct playback and subtitle burn-in.
+            if (!current.audio.isEmpty()) {
                 String[] labels = new String[current.audio.size()];
                 int selected = -1;
                 for (int i = 0; i < labels.length; i++) {
@@ -1610,6 +1623,10 @@ public final class MainActivity extends Activity {
         }
 
         void switchTo(JellyfinApi.Item target, Integer audioIndex) {
+            switchTo(target, audioIndex, subtitle, localSubtitle);
+        }
+
+        void switchTo(JellyfinApi.Item target, Integer audioIndex, int requestedSubtitle, PlaybackTracks.LocalTrack requestedLocal) {
             boolean sameEpisode = target == item;
             PlaybackChange pending = new PlaybackChange(stream, target, player.getCurrentPosition(),
                     player.getPlayWhenReady(), player.getPlaybackState() == Player.STATE_ENDED,
@@ -1618,19 +1635,22 @@ public final class MainActivity extends Activity {
             change = pending;
             player.pause();
             updateActions();
-            screen.showMessage(sameEpisode ? "正在切换音轨…" : "正在切换剧集…");
+            screen.showMessage(!sameEpisode ? "正在切换剧集…"
+                    : requestedSubtitle != subtitle || requestedLocal != localSubtitle ? "正在切换字幕…" : "正在切换音轨…");
+            int targetSubtitle = sameEpisode ? requestedSubtitle
+                    : pending.subtitle == PlaybackTracks.OFF ? PlaybackTracks.OFF : PlaybackTracks.AUTO;
+            Integer targetAudio = sameEpisode ? audioIndex != null ? audioIndex
+                    : pending.previous.audioIndex >= 0 ? pending.previous.audioIndex : null : null;
             browse.execute(() -> {
                 try {
                     JellyfinApi.Stream resolved = sameEpisode
-                            ? connection.stream(target, policy, pending.previous.sourceId, audioIndex)
-                            : connection.stream(target, policy);
+                            ? connection.stream(target, policy, pending.previous.sourceId, targetAudio, targetSubtitle)
+                            : connection.stream(target, policy, null, null, targetSubtitle);
                     ui.post(() -> {
                         if (playback != this || change != pending) return;
                         releasePlayer(false);
-                        if (!sameEpisode) {
-                            subtitle = pending.subtitle == PlaybackTracks.OFF ? PlaybackTracks.OFF : PlaybackTracks.AUTO;
-                            localSubtitle = null;
-                        }
+                        subtitle = targetSubtitle;
+                        localSubtitle = sameEpisode ? requestedLocal : null;
                         long position = sameEpisode ? pending.position : target.resumeMs;
                         startPlayback(resolved, this, position, pending.playWhenReady, false, null);
                     });

@@ -57,6 +57,9 @@ public final class LoadingTransitionCheck extends Instrumentation {
         if (failure.get() != null) throw new AssertionError(failure.get());
     }
     @Override public void onStart() {
+        if ("subtitles".equals(collectionSuite)) { new SubtitleHandlingCheck(this).run(); return; }
+        if ("subtitles-real".equals(collectionSuite)) { new SubtitlePlaybackCheck(this).run(); return; }
+        if ("subtitles-text".equals(collectionSuite)) { new SubtitlePlaybackCheck(this).run(true); return; }
         if (collectionSuite.startsWith("collections")) { new CollectionCheck(this).run(collectionSuite); return; }
         if (realPlaybackSuite) { new PlaybackLoadingRealCheck(this).run(); return; }
         if (playbackSuite) { new PlaybackLoadingCheck(this).run(); return; }

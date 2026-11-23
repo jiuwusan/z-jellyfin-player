@@ -23,6 +23,7 @@ final class PlaybackTracks {
         if (stream.hls) item.setMimeType(MimeTypes.APPLICATION_M3U8);
         List<MediaItem.SubtitleConfiguration> subtitles = new ArrayList<>();
         for (JellyfinApi.MediaTrack track : stream.subtitles) {
+            if (track.burnIn || track.subtitleUrl == null) continue;
             String mime;
             switch (track.format) {
                 case "srt": mime = MimeTypes.APPLICATION_SUBRIP; break;
@@ -57,10 +58,10 @@ final class PlaybackTracks {
         int preferred = selection == AUTO ? stream.defaultSubtitleIndex : selection;
         TrackSelectionParameters.Builder parameters = player.getTrackSelectionParameters().buildUpon()
                 .clearOverridesOfType(C.TRACK_TYPE_TEXT).setTrackTypeDisabled(C.TRACK_TYPE_TEXT,
-                        selection == OFF || selection == AUTO && preferred < 0 && stream.hls);
-        if (local != null) {
+                        stream.burnedSubtitleIndex >= 0 || selection == OFF || selection == AUTO && preferred < 0 && stream.hls);
+        if (local != null && stream.burnedSubtitleIndex < 0) {
             parameters.setOverrideForType(local.override());
-        } else if (preferred >= 0) {
+        } else if (preferred >= 0 && stream.burnedSubtitleIndex < 0) {
             String id = subtitleId(preferred);
             for (LocalTrack option : supported(tracks, C.TRACK_TYPE_TEXT)) {
                 String formatId = option.format.id;
@@ -72,6 +73,12 @@ final class PlaybackTracks {
             }
         }
         player.setTrackSelectionParameters(parameters.build());
+    }
+
+    static int burnInIndex(List<JellyfinApi.MediaTrack> tracks, int defaultIndex, int selection) {
+        int desired = selection == AUTO ? defaultIndex : selection;
+        for (JellyfinApi.MediaTrack track : tracks) if (track.index == desired && track.burnIn) return desired;
+        return -1;
     }
 
     private static String subtitleId(int index) {
