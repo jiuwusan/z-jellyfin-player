@@ -60,9 +60,11 @@ final class SubtitleRecoveryRealCheck {
         return (boolean) field(page, "loggedSubtitle");
     }
     private void exercise(JellyfinApi.Item item, int index, String mode) throws Exception {
+        api.subtitleCache.clear(); // Each fault scenario must reach the HTTP layer independently.
         stage(mode + " START index=" + index);
         AtomicInteger subtitleRequests = new AtomicInteger(), playbackRequests = new AtomicInteger(), burnRequests = new AtomicInteger();
         AtomicReference<ExoPlayer> firstPlayer = new AtomicReference<>();
+        AtomicReference<String> subtitleUri = new AtomicReference<>();
         OkHttpClient injected = original.newBuilder().addInterceptor(chain -> {
             Request request = chain.request();
             String path = request.url().encodedPath();
@@ -82,6 +84,7 @@ final class SubtitleRecoveryRealCheck {
                 if (force && "burn-failed".equals(mode)) return failure(request, 503, "burn negotiation rejected");
             }
             if (path.toLowerCase(java.util.Locale.ROOT).contains("/subtitles/") && path.toLowerCase(java.util.Locale.ROOT).contains("stream.")) {
+                subtitleUri.set(request.url().toString());
                 int attempt = subtitleRequests.incrementAndGet();
                 if ("transient".equals(mode) && attempt == 1) return failure(request, 503, "temporary subtitle failure");
                 if (("stale".equals(mode) || mode.startsWith("refresh-")) && playbackRequests.get() <= 2) return failure(request, 404, "expired subtitle address");
@@ -154,9 +157,14 @@ final class SubtitleRecoveryRealCheck {
                     + " external=" + (stream == null ? -9 : PlaybackTracks.externalSubtitleIndex(stream, (int) field(page, "subtitle"))));
         });
         check(passed[0], mode + " did not settle");
+        if (("parser".equals(mode) || "burn-failed".equals(mode)) && subtitleUri.get() != null)
+            check(api.subtitleCache.get(subtitleUri.get(), SystemClock.elapsedRealtime()) == null, "Malformed subtitle remained cached");
         if ("auth".equals(mode)) {
             // Make the server healthy again, then exercise the actual menu handler's explicit retry.
             set(api, "http", original);
+            check(subtitleUri.get() != null, "Missing failed subtitle URI");
+            api.subtitleCache.put(subtitleUri.get(), "stale invalid cached subtitle".getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                    SystemClock.elapsedRealtime(), api.subtitleCache.generation());
             ui(() -> call(field(activity, "playback"), "selectSubtitle", new Class<?>[]{int.class, PlaybackTracks.LocalTrack.class}, index, null));
             final boolean[] retried = {false};
             long retryUntil = SystemClock.uptimeMillis() + 60_000;

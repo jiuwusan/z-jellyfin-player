@@ -30,6 +30,7 @@ final class JellyfinApi {
     private final String device;
     private String token;
     private String userId;
+    final SubtitleCache subtitleCache = new SubtitleCache();
 
     JellyfinApi(ConnectionSettings settings, String device) {
         this.settings = settings;
@@ -58,6 +59,7 @@ final class JellyfinApi {
                 new JSONObject().put("Username", settings.user).put("Pw", settings.password));
         token = login.getString("AccessToken");
         userId = login.getJSONObject("User").getString("Id");
+        subtitleCache.clear();
         Log.i(TAG, "Login successful");
     }
 

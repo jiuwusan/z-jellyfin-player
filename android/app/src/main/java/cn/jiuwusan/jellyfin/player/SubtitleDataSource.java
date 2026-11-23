@@ -1,6 +1,7 @@
 package cn.jiuwusan.jellyfin.player;
 
 import android.net.Uri;
+import android.os.SystemClock;
 import androidx.media3.common.C;
 import androidx.media3.datasource.ByteArrayDataSource;
 import androidx.media3.datasource.DataSource;
@@ -18,12 +19,20 @@ final class SubtitleDataSource implements DataSource {
     private static final int MAX_BYTES = 16 * 1024 * 1024;
     private final DataSource upstream;
     private final Uri subtitle;
+    private final SubtitleCache cache;
     private ByteArrayDataSource buffered;
     private Map<String, List<String>> headers = Collections.emptyMap();
-    SubtitleDataSource(DataSource upstream, Uri subtitle) { this.upstream = upstream; this.subtitle = subtitle; }
+    SubtitleDataSource(DataSource upstream, Uri subtitle) { this(upstream, subtitle, null); }
+    SubtitleDataSource(DataSource upstream, Uri subtitle, SubtitleCache cache) {
+        this.upstream = upstream; this.subtitle = subtitle; this.cache = cache;
+    }
     @Override public void addTransferListener(TransferListener listener) { upstream.addTransferListener(listener); }
     @Override public long open(DataSpec spec) throws IOException {
         if (subtitle == null || !subtitle.equals(spec.uri)) return upstream.open(spec);
+        String key = spec.uri.toString();
+        long generation = cache == null ? -1 : cache.generation();
+        byte[] cached = cache == null ? null : cache.get(key, SystemClock.elapsedRealtime());
+        if (cached != null) { buffered = new ByteArrayDataSource(cached); return buffered.open(spec); }
         for (int attempt = 1; ; attempt++) {
             try {
                 upstream.open(spec.buildUpon().setPosition(0).setLength(C.LENGTH_UNSET).build());
@@ -37,7 +46,13 @@ final class SubtitleDataSource implements DataSource {
                         throw new IOException(new UnsupportedOperationException("Standalone subtitle exceeds memory budget"));
                     output.write(chunk, 0, count);
                 }
-                buffered = new ByteArrayDataSource(output.toByteArray());
+                byte[] complete = output.toByteArray();
+                boolean noStore = false;
+                for (Map.Entry<String, List<String>> header : headers.entrySet())
+                    if ("Cache-Control".equalsIgnoreCase(header.getKey())) for (String value : header.getValue())
+                        if (value.toLowerCase(java.util.Locale.ROOT).contains("no-store")) noStore = true;
+                if (cache != null && !noStore) cache.put(key, complete, SystemClock.elapsedRealtime(), generation);
+                buffered = new ByteArrayDataSource(complete);
                 return buffered.open(spec);
             } catch (IOException error) {
                 long delay = SubtitleRecovery.retryDelay(error, attempt);

@@ -1662,6 +1662,7 @@ public final class MainActivity extends Activity {
             int desired = requested == PlaybackTracks.AUTO ? stream.defaultSubtitleIndex : requested;
             boolean retryFailed = desired >= 0 && failedSubtitles.remove(desired);
             if (retryFailed) {
+                invalidateSubtitle(stream, desired);
                 subtitleRecovery.reset(desired);
                 recoveryOriginal = null;
                 switchTo(item, null, requested, local);
@@ -1685,6 +1686,7 @@ public final class MainActivity extends Activity {
 
         void subtitleFailed(ExoPlayer active, JellyfinApi.Stream failed, int index, IOException error) {
             if (playback != this || player != active || stream != failed || preparationFailed || index < 0) return;
+            invalidateSubtitle(failed, index);
             PlaybackChange pending = change;
             if (pending != null) {
                 if (pending.recoveryAction == null) { recoverSwitch(); return; }
@@ -1713,6 +1715,11 @@ public final class MainActivity extends Activity {
             if (action == SubtitleRecovery.Action.DISABLE)
                 Toast.makeText(MainActivity.this, "字幕加载失败，已关闭；可在字幕菜单重新选择重试。", Toast.LENGTH_LONG).show();
             Log.i(JellyfinApi.TAG, "Subtitle recovery index=" + index + " action=" + action);
+        }
+
+        void invalidateSubtitle(JellyfinApi.Stream failed, int index) {
+            JellyfinApi.MediaTrack track = PlaybackTracks.subtitleTrack(failed.subtitles, index);
+            if (track != null && track.subtitleUrl != null) connection.subtitleCache.remove(track.subtitleUrl.toString());
         }
 
         void failedSubtitleSwitch(PlaybackChange pending, Exception error) {
@@ -1914,7 +1921,7 @@ public final class MainActivity extends Activity {
             ui.post(() -> current.subtitleFailed(playerReference.get(), resolved, externalIndex, error));
         });
         ExoPlayer active = new ExoPlayer.Builder(this, renderers)
-                .setMediaSourceFactory(new DefaultMediaSourceFactory(() -> new SubtitleDataSource(data.createDataSource(), subtitleUri))
+                .setMediaSourceFactory(new DefaultMediaSourceFactory(() -> new SubtitleDataSource(data.createDataSource(), subtitleUri, current.connection.subtitleCache))
                         .setLoadErrorHandlingPolicy(loadPolicy)).build();
         playerReference.set(active);
         player = active;
