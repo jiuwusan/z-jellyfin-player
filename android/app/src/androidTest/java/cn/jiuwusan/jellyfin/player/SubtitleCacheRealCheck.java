@@ -87,7 +87,10 @@ final class SubtitleCacheRealCheck {
             ui(() -> {
                 initial.pause(); JellyfinApi.Stream stream = (JellyfinApi.Stream) field(activity, "stream");
                 for (JellyfinApi.MediaTrack track : stream.subtitles) if ("External".equals(track.deliveryMethod) && track.available() && "srt".equals(track.format)) { text[0] = track; break; }
+                for (JellyfinApi.MediaTrack track : stream.subtitles) if ("External".equals(track.deliveryMethod) && track.available()
+                        && "srt".equals(track.format) && track.label.contains("内嵌")) { text[0] = track; break; }
                 check(text[0] != null, "No real SRT track");
+                stage("real SRT delivery External, physical internal=" + text[0].label.contains("内嵌"));
                 call(field(activity, "playback"), "selectSubtitle", new Class<?>[]{int.class, PlaybackTracks.LocalTrack.class}, text[0].index, null);
             });
             ExoPlayer active = frame();

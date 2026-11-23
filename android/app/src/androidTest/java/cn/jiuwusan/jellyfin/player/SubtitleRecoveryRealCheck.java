@@ -56,7 +56,7 @@ final class SubtitleRecoveryRealCheck {
         if ("healthy".equals(mode)) return (boolean) field(activity, "playbackStarted");
         if ("burn-failed".equals(mode) || "auth".equals(mode) || "refresh-auth".equals(mode))
             return (int) field(page, "subtitle") == PlaybackTracks.OFF && player.getTrackSelectionParameters().disabledTrackTypes.contains(C.TRACK_TYPE_TEXT);
-        if ("parser".equals(mode)) return stream.burnedSubtitleIndex >= 0;
+        if ("parser".equals(mode) || "srt-budget".equals(mode)) return stream.burnedSubtitleIndex >= 0;
         return (boolean) field(page, "loggedSubtitle");
     }
     private void exercise(JellyfinApi.Item item, int index, String mode) throws Exception {
@@ -89,6 +89,12 @@ final class SubtitleRecoveryRealCheck {
                 if ("transient".equals(mode) && attempt == 1) return failure(request, 503, "temporary subtitle failure");
                 if (("stale".equals(mode) || mode.startsWith("refresh-")) && playbackRequests.get() <= 2) return failure(request, 404, "expired subtitle address");
                 if ("auth".equals(mode)) return failure(request, 401, "subtitle unauthorized");
+                if ("srt-budget".equals(mode)) {
+                    StringBuilder crowded = new StringBuilder();
+                    for (int i = 0; i < 129; i++) crowded.append(i + 1).append("\n00:00:00,000 --> 00:00:01,000\nfixture\n\n");
+                    return new Response.Builder().request(request).protocol(okhttp3.Protocol.HTTP_1_1).code(200).message("fixture SRT budget")
+                            .body(ResponseBody.create(crowded.toString(), MediaType.get("application/x-subrip"))).build();
+                }
                 if ("parser".equals(mode) || "burn-failed".equals(mode))
                     return new Response.Builder().request(request).protocol(okhttp3.Protocol.HTTP_1_1).code(200).message("fixture malformed TTML")
                             .body(ResponseBody.create("this is not valid XML", MediaType.get("application/ttml+xml"))).build();
@@ -106,9 +112,10 @@ final class SubtitleRecoveryRealCheck {
                     for (int j = 0; j < tracks.length(); j++) {
                         JSONObject track = tracks.getJSONObject(j);
                         if (track.optInt("Index", -1) == index && "Subtitle".equals(track.optString("Type"))
-                                && ("parser".equals(mode) || "burn-failed".equals(mode))) {
-                            track.put("Codec", "ttml").put("DeliveryMethod", "External")
-                                    .put("DeliveryUrl", "/Videos/" + item.id + "/" + source.getString("Id") + "/Subtitles/" + index + "/Stream.ttml");
+                                && ("parser".equals(mode) || "burn-failed".equals(mode) || "srt-budget".equals(mode))) {
+                            String format = "srt-budget".equals(mode) ? "srt" : "ttml";
+                            track.put("Codec", format).put("DeliveryMethod", "External")
+                                    .put("DeliveryUrl", "/Videos/" + item.id + "/" + source.getString("Id") + "/Subtitles/" + index + "/Stream." + format);
                         }
                     }
                 }
@@ -157,7 +164,7 @@ final class SubtitleRecoveryRealCheck {
                     + " external=" + (stream == null ? -9 : PlaybackTracks.externalSubtitleIndex(stream, (int) field(page, "subtitle"))));
         });
         check(passed[0], mode + " did not settle");
-        if (("parser".equals(mode) || "burn-failed".equals(mode)) && subtitleUri.get() != null)
+        if (("parser".equals(mode) || "burn-failed".equals(mode) || "srt-budget".equals(mode)) && subtitleUri.get() != null)
             check(api.subtitleCache.get(subtitleUri.get(), SystemClock.elapsedRealtime()) == null, "Malformed subtitle remained cached");
         if ("auth".equals(mode)) {
             // Make the server healthy again, then exercise the actual menu handler's explicit retry.
@@ -188,7 +195,7 @@ final class SubtitleRecoveryRealCheck {
             JellyfinApi.Stream stream = (JellyfinApi.Stream) field(activity, "stream");
             check(Math.abs(player.getCurrentPosition() - 180_000) < 15_000, mode + " lost playback position");
             if (paused) check(!player.getPlayWhenReady(), "Recovery lost paused state");
-            if ("parser".equals(mode)) check(stream.burnedSubtitleIndex == index && player.getTrackSelectionParameters().disabledTrackTypes.contains(C.TRACK_TYPE_TEXT), "Parser fallback did not disable local text");
+            if ("parser".equals(mode) || "srt-budget".equals(mode)) check(stream.burnedSubtitleIndex == index && player.getTrackSelectionParameters().disabledTrackTypes.contains(C.TRACK_TYPE_TEXT), "Parser fallback did not disable local text");
             check("3808000".equals(stream.url.queryParameter("VideoBitRate")), "Recovery changed quality budget");
             call(activity, "onBackPressed", new Class<?>[]{});
             // Old asynchronous failure must not restart a closed player.
@@ -200,7 +207,7 @@ final class SubtitleRecoveryRealCheck {
         if ("stale".equals(mode)) check(subtitleRequests.get() == 2 && burnRequests.get() == 0 && playbackRequests.get() == 4, "Stale address was not refreshed exactly once");
         if ("auth".equals(mode)) check(subtitleRequests.get() == 1 && burnRequests.get() == 0, "Auth failure retried or burned");
         if ("refresh-auth".equals(mode) || "refresh-video".equals(mode)) check(burnRequests.get() == 0, "Refresh auth/video failure was misclassified as subtitle burn");
-        if ("parser".equals(mode)) check(burnRequests.get() == 2, "Parser fallback did not negotiate one forced stream");
+        if ("parser".equals(mode) || "srt-budget".equals(mode)) check(burnRequests.get() == 2, "Parser fallback did not negotiate one forced stream");
         if ("burn-failed".equals(mode)) check(burnRequests.get() == 1, "Failed burn looped");
         stage(mode + " PASS subtitles=" + subtitleRequests.get() + " playbackInfo=" + playbackRequests.get() + " burnInfo=" + burnRequests.get());
         set(api, "http", original);
@@ -210,7 +217,8 @@ final class SubtitleRecoveryRealCheck {
         return new Response.Builder().request(request).protocol(okhttp3.Protocol.HTTP_1_1).code(code).message(message)
                 .body(ResponseBody.create("fixture", MediaType.get("text/plain"))).build();
     }
-    void run() {
+    void run() { run(null); }
+    void run(String onlyMode) {
         Bundle result = new Bundle();
         try {
             activity = test.startActivitySync(new Intent(Intent.ACTION_MAIN).setClassName(test.getTargetContext().getPackageName(), MainActivity.class.getName())
@@ -231,9 +239,11 @@ final class SubtitleRecoveryRealCheck {
                 break;
             }
             check(text != null, "No external subtitle for fault injection");
-            for (String mode : new String[]{"healthy", "transient", "stale", "parser", "burn-failed", "auth", "refresh-auth", "refresh-video"}) exercise(episode, text.index, mode);
+            for (String mode : new String[]{"healthy", "transient", "stale", "parser", "burn-failed", "auth", "refresh-auth", "refresh-video", "srt-budget"})
+                if (onlyMode == null || onlyMode.equals(mode)) exercise(episode, text.index, mode);
             check(sealed.equals(activity.getSharedPreferences("connection", 0).getString("sealed", null)), "Saved connection changed");
-            result.putString("result", "ALL_PASS: transient retry / stale refresh / real text burn / burn failure continues video / pause-position-quality / auth stop / stale callback / unchanged connection");
+            result.putString("result", onlyMode == null ? "ALL_PASS: transient retry / stale refresh / real text burn / burn failure continues video / pause-position-quality / auth stop / stale callback / unchanged connection"
+                    : "ALL_PASS: " + onlyMode + " / bounded burn / position-quality / invalidated cache / unchanged connection");
             test.finish(Activity.RESULT_OK, result);
         } catch (Throwable error) {
             result.putString("failure", android.util.Log.getStackTraceString(error)); test.finish(Activity.RESULT_CANCELED, result);

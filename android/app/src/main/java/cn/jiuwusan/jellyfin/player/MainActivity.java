@@ -1922,7 +1922,7 @@ public final class MainActivity extends Activity {
         });
         ExoPlayer active = new ExoPlayer.Builder(this, renderers)
                 .setMediaSourceFactory(new DefaultMediaSourceFactory(() -> new SubtitleDataSource(data.createDataSource(), subtitleUri, current.connection.subtitleCache))
-                        .setLoadErrorHandlingPolicy(loadPolicy)).build();
+                        .setSubtitleParserFactory(new SrtSubtitleParserFactory()).setLoadErrorHandlingPolicy(loadPolicy)).build();
         playerReference.set(active);
         player = active;
         screen.setPlayer(active);

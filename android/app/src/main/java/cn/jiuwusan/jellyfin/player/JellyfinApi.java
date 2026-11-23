@@ -481,7 +481,8 @@ final class JellyfinApi {
         JSONObject transcode = new JSONObject().put("Type", "Video").put("Context", "Streaming")
                 .put("Protocol", "hls").put("Container", "ts").put("VideoCodec", "h264").put("AudioCodec", "aac");
         JSONArray subtitles = new JSONArray();
-        for (String format : forceBurn ? new String[0] : new String[] { "srt", "subrip", "ttml" }) {
+        // Complete SRT files are normalized into seekable display snapshots; native MKV packets lose overlaps on seek.
+        for (String format : forceBurn ? new String[0] : new String[] { "ttml" }) {
             subtitles.put(new JSONObject().put("Format", format).put("Method", "Embed"));
         }
         for (String format : new String[] { "srt", "subrip", "vtt", "webvtt", "ass", "ssa", "ttml" }) {
