@@ -686,6 +686,7 @@ public final class MainActivity extends Activity {
     private static final class LibraryLocation {
         final JellyfinApi.Item folder;
         final boolean catalog;
+        JellyfinApi.Item details;
         final List<JellyfinApi.Item> items = new ArrayList<>();
         int scrollY;
         boolean loaded;
@@ -699,6 +700,37 @@ public final class MainActivity extends Activity {
     private void libraryPage(LibraryLocation location, Runnable back) {
         LinearLayout view = panel(location.folder.title, true, back, browseTab);
         showLibraryPage(view, location, () -> libraryPage(location, back));
+    }
+
+    private void collectionPage(LibraryLocation location, Runnable back) {
+        stopPlayback();
+        LinearLayout view = panel("合集详情", true, back, browseTab);
+        int expected = page;
+        view.setPadding(0, 0, 0, dp(24));
+        Runnable render = () -> {
+            showDetails(view, location.details, back, null);
+            showLibraryPage(view, location, () -> collectionPage(location, back));
+        };
+        if (location.details != null) { render.run(); return; }
+        JellyfinApi connection = api;
+        LoadingUi.Pending pending = new LoadingUi.Pending(view, libraryUi, ui, LoadingUi.Kind.DETAIL,
+                location.folder.title, () -> page == expected);
+        browse.execute(() -> {
+            try {
+                JellyfinApi.Item details = connection.details(location.folder);
+                onPage(expected, () -> {
+                    pending.finish();
+                    location.details = details;
+                    render.run();
+                    LoadingUi.ready(view);
+                });
+            } catch (Exception error) {
+                onPage(expected, () -> {
+                    pending.finish();
+                    LoadingUi.failure(view, libraryUi, message(error, "读取合集失败"), () -> collectionPage(location, back), false);
+                });
+            }
+        });
     }
 
     private void showLibraryPage(LinearLayout view, LibraryLocation location, Runnable reopen) {
@@ -716,6 +748,7 @@ public final class MainActivity extends Activity {
         private final int expected = page;
         private final int gridWidth = screenWidth();
         private final LoadingUi.RefreshNotice notice;
+        private final CollectionGrid collectionGrid;
         private boolean loading;
         private boolean failed;
 
@@ -742,6 +775,12 @@ public final class MainActivity extends Activity {
             refresh.setOnRefreshListener(() -> load(true));
             this.location = location;
             this.reopen = reopen;
+            boolean collection = location.folder != null && location.folder.collection && !location.catalog;
+            collectionGrid = collection ? new CollectionGrid(grid, libraryUi, gridWidth, this::open) : null;
+            if (collection) {
+                grid.setPadding(contentGutter(), 0, contentGutter(), 0);
+                footer.setPadding(contentGutter(), 0, contentGutter(), 0);
+            }
         }
 
         void show() {
@@ -772,16 +811,20 @@ public final class MainActivity extends Activity {
         }
 
         private void appendItems(int offset) {
-            libraryUi.appendGrid(grid, location.items, gridWidth, offset, item -> {
-                location.scrollY = scroll.getScrollY();
-                openItem(item, reopen);
-            });
+            if (collectionGrid == null) libraryUi.appendGrid(grid, location.items, gridWidth, offset, this::open);
+            else collectionGrid.append(location.items, offset, scroll);
             footer.removeAllViews();
             if (location.items.isEmpty()) {
                 grid.removeAllViews();
-                LoadingUi.empty(grid, libraryUi, "这个媒体库暂无内容", "可以切换其他媒体库查看。");
+                LoadingUi.empty(grid, libraryUi, collectionGrid == null ? "这个媒体库暂无内容" : "这个合集暂无内容",
+                        collectionGrid == null ? "可以切换其他媒体库查看。" : "可以返回查看其他影片。");
             }
             else if (!location.more) footer.addView(LoadingUi.line(libraryUi, "已显示全部", false));
+        }
+
+        private void open(JellyfinApi.Item item) {
+            location.scrollY = scroll.getScrollY();
+            openItem(item, reopen);
         }
 
         private void load() {
@@ -841,7 +884,8 @@ public final class MainActivity extends Activity {
     }
 
     private void openItem(JellyfinApi.Item item, Runnable back) {
-        if ("Episode".equals(item.type)) playbackPage(item, null, back);
+        if (item.collection) collectionPage(new LibraryLocation(item, false), back);
+        else if ("Episode".equals(item.type)) playbackPage(item, null, back);
         else if (item.folder && !item.series) libraryPage(new LibraryLocation(item, false), back);
         else detailsPage(item, back);
     }
@@ -920,20 +964,24 @@ public final class MainActivity extends Activity {
         title.setGravity(Gravity.CENTER);
         heading.addView(title, new LinearLayout.LayoutParams(-1, -2));
         List<String> metadata = new ArrayList<>();
-        if (item.year > 0) metadata.add(Integer.toString(item.year));
+        if (!item.collection && item.year > 0) metadata.add(Integer.toString(item.year));
+        if (item.collection) {
+            metadata.add("合集");
+            if (item.childCount >= 0) metadata.add(item.childCount + " 项");
+        }
         if (item.series) metadata.add("剧集");
         if ("Movie".equals(item.type)) metadata.add("电影");
-        if (item.durationMs > 0) metadata.add(item.durationMs / 60_000 + " 分钟");
+        if (!item.collection && item.durationMs > 0) metadata.add(item.durationMs / 60_000 + " 分钟");
         if (!metadata.isEmpty()) {
             TextView info = libraryUi.label(TextUtils.join(" · ", metadata), 18, LibraryUi.MUTED, false);
             info.setGravity(Gravity.CENTER);
             info.setPadding(0, dp(7), 0, 0);
             heading.addView(info);
         }
-        if (item.played) watched(heading);
+        if (!item.collection && item.played) watched(heading);
         LinearLayout playbackArea = column();
         ribbon.addView(playbackArea, new LinearLayout.LayoutParams(-1, -2));
-        if (!item.series) {
+        if (!item.series && !item.collection) {
             Runnable returnToDetails = () -> detailsPage(item, back);
             detailPlaybackActions(playbackArea, item, returnToDetails);
             if (item.resumeMs > 0) {

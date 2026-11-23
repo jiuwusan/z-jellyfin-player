@@ -223,8 +223,9 @@ final class LibraryUi {
         String episode = (showSeason ? "第 " + item.season + " 季" : "")
                 + (item.index > 0 ? (showSeason ? " · " : "") + "第 " + item.index + " 集" : "");
         String episodeTitle = homeCard ? "" : episodeTitle(item);
-        String itemType = item.series ? "剧集" : "Movie".equals(item.type) ? "电影" : "";
-        String year = item.year > 0 ? Integer.toString(item.year) : "";
+        String itemType = item.collection ? "合集" : item.series ? "剧集" : "Movie".equals(item.type) ? "电影" : "";
+        String year = item.collection ? item.childCount >= 0 ? item.childCount + " 项" : ""
+                : item.year > 0 ? Integer.toString(item.year) : "";
         String subtitle = item.seriesName.isEmpty()
                 ? itemType.isEmpty() ? year : year.isEmpty() ? itemType : itemType + " · " + year
                 : episodeTitle.isEmpty() ? episode

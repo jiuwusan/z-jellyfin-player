@@ -112,17 +112,24 @@ final class JellyfinApi {
 
     LibraryItemsPage libraryItems(Item parent, boolean catalog, int offset) throws Exception {
         HttpUrl.Builder request = url("Items").addQueryParameter("userId", userId)
-                .addQueryParameter("SortBy", "DateCreated,SortName")
-                .addQueryParameter("SortOrder", "Descending,Ascending")
                 .addQueryParameter("StartIndex", Integer.toString(offset))
                 .addQueryParameter("Limit", Integer.toString(LIBRARY_PAGE_SIZE));
         if (parent != null) request.addQueryParameter("ParentId", parent.id);
+        if (parent != null && parent.collection && !catalog) {
+            // A collection owns its member ordering. Never recursively unfold or collapse its children.
+            request.addQueryParameter("Recursive", "false").addQueryParameter("CollapseBoxSetItems", "false");
+        } else {
+            request.addQueryParameter("SortBy", "DateCreated,SortName")
+                    .addQueryParameter("SortOrder", "Descending,Ascending");
+        }
         if (catalog) {
             String types = parent == null ? "Movie,Series"
                     : "tvshows".equals(parent.collectionType) ? "Series"
-                    : "movies".equals(parent.collectionType) ? "Movie" : "Movie,Series,Video";
+                    : "movies".equals(parent.collectionType) ? "Movie"
+                    : "boxsets".equals(parent.collectionType) ? "BoxSet" : "Movie,Series,Video";
             request.addQueryParameter("Recursive", "true")
-                    .addQueryParameter("IncludeItemTypes", types);
+                    .addQueryParameter("IncludeItemTypes", types)
+                    .addQueryParameter("Fields", "ItemCounts");
         }
         JSONObject result = json("读取媒体库", request.build(), null);
         List<Item> items = entries(result.getJSONArray("Items"));
@@ -447,9 +454,9 @@ final class JellyfinApi {
 
     static final class Item {
         final String id, title, seriesName, seriesId, seriesBackdropId, overview, type, collectionType;
-        final boolean series, folder, hasPoster, hasBackdrop, played;
+        final boolean series, collection, folder, hasPoster, hasBackdrop, played;
         final long durationMs, resumeMs;
-        final int year, index, season;
+        final int year, index, season, childCount;
         int seriesYear;
 
         int displayYear() { return seriesId.isEmpty() ? year : seriesYear; }
@@ -462,7 +469,9 @@ final class JellyfinApi {
             season = entry.optInt("ParentIndexNumber");
             title = "Episode".equals(type) && index > 0 ? "第 " + index + " 集 · " + name : name;
             series = "Series".equals(type);
-            folder = entry.optBoolean("IsFolder") || "CollectionFolder".equals(type) || "UserView".equals(type);
+            collection = "BoxSet".equals(type);
+            folder = collection || entry.optBoolean("IsFolder") || "CollectionFolder".equals(type) || "UserView".equals(type);
+            childCount = Math.max(-1, entry.optInt("ChildCount", -1));
             seriesName = entry.optString("SeriesName", "");
             seriesId = entry.optString("SeriesId", "");
             collectionType = entry.optString("CollectionType", "");

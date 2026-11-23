@@ -28,10 +28,12 @@ public final class LoadingTransitionCheck extends Instrumentation {
 
     private boolean playbackSuite;
     private boolean realPlaybackSuite;
+    private String collectionSuite;
     @Override public void onCreate(Bundle args) {
         super.onCreate(args);
         playbackSuite = args != null && "playback".equals(args.getString("suite"));
         realPlaybackSuite = args != null && "playback-real".equals(args.getString("suite"));
+        collectionSuite = args == null ? "" : args.getString("suite", "");
         start();
     }
     private void check(boolean ok, String message) { if (!ok) throw new AssertionError(message); }
@@ -55,6 +57,7 @@ public final class LoadingTransitionCheck extends Instrumentation {
         if (failure.get() != null) throw new AssertionError(failure.get());
     }
     @Override public void onStart() {
+        if (collectionSuite.startsWith("collections")) { new CollectionCheck(this).run(collectionSuite); return; }
         if (realPlaybackSuite) { new PlaybackLoadingRealCheck(this).run(); return; }
         if (playbackSuite) { new PlaybackLoadingCheck(this).run(); return; }
         Bundle result = new Bundle();
