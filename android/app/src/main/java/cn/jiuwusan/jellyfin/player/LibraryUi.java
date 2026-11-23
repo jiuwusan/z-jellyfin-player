@@ -333,6 +333,10 @@ final class LibraryUi {
         return cover;
     }
 
+    FrameLayout playbackBackdrop(JellyfinApi.Item item) {
+        return picture(item, true, 0, true, false);
+    }
+
     FrameLayout detailPoster(JellyfinApi.Item item) {
         FrameLayout poster = picture(item, false, RADIUS_CONTROL, false, true);
         poster.setElevation(dp(5));

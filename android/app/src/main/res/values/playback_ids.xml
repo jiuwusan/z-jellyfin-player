@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <item name="playback_preparation_cover" type="id" />
+    <item name="playback_preparation_spinner" type="id" />
+    <item name="playback_preparation_retry" type="id" />
     <item name="playback_controls_toggle" type="id" />
     <item name="playback_timeline" type="id" />
     <item name="playback_elapsed" type="id" />

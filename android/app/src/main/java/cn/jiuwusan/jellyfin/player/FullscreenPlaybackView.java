@@ -1,6 +1,7 @@
 package cn.jiuwusan.jellyfin.player;
 
 import android.content.Context;
+import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
@@ -14,6 +15,7 @@ import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
+import android.widget.ProgressBar;
 import androidx.media3.common.C;
 import androidx.media3.common.Player;
 import androidx.media3.common.text.Cue;
@@ -45,6 +47,24 @@ final class FullscreenPlaybackView extends FrameLayout {
     private final TextView title, subtitle, message, time, quality, play, rewind, forward;
     private final TextView previous, next, subtitles, audio, trackTitle;
     private final DefaultTimeBar timeline;
+    private final FrameLayout preparationCover;
+    private final LinearLayout preparationCenter, preparationError;
+    private final ProgressBar preparationSpinner;
+    private final TextView preparationSlow, preparationRetry, preparationReason;
+    private boolean preparing;
+    private boolean preparationFailed;
+    private boolean desiredPrevious, desiredNext, desiredText, desiredAudio;
+    private long preparationPosition, preparationDuration;
+    private int preparationGeneration;
+    private Runnable retryPreparation;
+    private final Runnable revealSpinner = this::revealPreparationSpinner;
+    private final Runnable revealSlow = this::revealPreparationSlow;
+    private void revealPreparationSpinner() {
+        if (preparing && !preparationFailed) preparationSpinner.setVisibility(VISIBLE);
+    }
+    private void revealPreparationSlow() {
+        if (preparing && !preparationFailed) preparationSlow.setVisibility(VISIBLE);
+    }
     private final int[] captionLocation = new int[2];
     private final int[] bottomLocation = new int[2];
     private Player player;
@@ -85,6 +105,11 @@ final class FullscreenPlaybackView extends FrameLayout {
         video.setResizeMode(AspectRatioFrameLayout.RESIZE_MODE_FIT);
         video.setKeepScreenOn(true);
         addView(video, new LayoutParams(-1, -1));
+
+        preparationCover = new FrameLayout(context);
+        preparationCover.setId(R.id.playback_preparation_cover);
+        preparationCover.setVisibility(GONE);
+        addView(preparationCover, new LayoutParams(-1, -1));
 
         touchSurface = new View(context);
         touchSurface.setId(R.id.playback_controls_toggle);
@@ -167,6 +192,54 @@ final class FullscreenPlaybackView extends FrameLayout {
         messageBounds.setMargins(dp(24), 0, dp(24), 0);
         addView(message, messageBounds);
 
+        preparationCenter = style.column();
+        preparationCenter.setGravity(Gravity.CENTER);
+        preparationCenter.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+        preparationCenter.setVisibility(GONE);
+        LayoutParams centerBounds = new LayoutParams(-1, -1);
+        addView(preparationCenter, centerBounds);
+        preparationSpinner = new ProgressBar(context);
+        preparationSpinner.setId(R.id.playback_preparation_spinner);
+        preparationSpinner.setIndeterminateTintList(ColorStateList.valueOf(LibraryUi.ACCENT_LIGHT));
+        preparationSpinner.setContentDescription("正在准备视频，等待首帧");
+        if (!LoadingUi.animationsEnabled(context)) {
+            GradientDrawable ring = new GradientDrawable();
+            ring.setShape(GradientDrawable.OVAL);
+            ring.setStroke(dp(3), LibraryUi.ACCENT_LIGHT);
+            preparationSpinner.setIndeterminateDrawable(ring);
+        }
+        preparationCenter.addView(preparationSpinner, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        preparationSlow = style.label("视频准备较慢，请稍候", 22, LibraryUi.TEXT, false);
+        preparationSlow.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams slowBounds = new LinearLayout.LayoutParams(-2, -2);
+        slowBounds.topMargin = dp(14);
+        preparationCenter.addView(preparationSlow, slowBounds);
+        preparationError = style.column();
+        preparationError.setGravity(Gravity.CENTER);
+        ScrollView failureCopy = new ScrollView(context);
+        failureCopy.setFillViewport(true);
+        LinearLayout failureText = style.column();
+        failureText.setGravity(Gravity.CENTER);
+        failureCopy.addView(failureText, new ScrollView.LayoutParams(-1, -2));
+        preparationError.addView(failureCopy, new LinearLayout.LayoutParams(-1, 0, 1));
+        TextView failedTitle = style.label("播放失败", 24, LibraryUi.TEXT, true);
+        failedTitle.setGravity(Gravity.CENTER);
+        failureText.addView(failedTitle);
+        preparationReason = style.label("暂时无法播放，请重试。", 18, LIGHT_TEXT, false);
+        preparationReason.setGravity(Gravity.CENTER);
+        preparationReason.setMaxLines(2);
+        preparationReason.setPadding(0, dp(4), 0, dp(8));
+        failureText.addView(preparationReason);
+        LinearLayout failures = new LinearLayout(context);
+        failures.setGravity(Gravity.CENTER);
+        preparationRetry = addControl(failures, "重试播放", "重试播放", this::retryPreparation);
+        preparationRetry.setId(R.id.playback_preparation_retry);
+        preparationRetry.setTextColor(LibraryUi.ACCENT_LIGHT);
+        preparationRetry.setBackground(outline(SELECTED_BACKGROUND, 0x8059c7ed, LibraryUi.RADIUS_CONTROL));
+        addControl(failures, "返回", "返回", close);
+        preparationError.addView(failures);
+        preparationCenter.addView(preparationError, new LinearLayout.LayoutParams(-1, -1));
+
         trackPanel = style.column();
         trackPanel.setId(R.id.playback_track_panel);
         trackPanel.setBackground(outline(0xf5111a20, 0x96657785, LibraryUi.RADIUS_PANEL));
@@ -202,11 +275,13 @@ final class FullscreenPlaybackView extends FrameLayout {
         bottom.addOnLayoutChangeListener((view, l, t, r, b, ol, ot, or, ob) -> {
             liftCaptions();
             fitTrackList();
+            fitPreparation();
         });
+        header.addOnLayoutChangeListener((view, l, t, r, b, ol, ot, or, ob) -> fitPreparation());
         SubtitleView captions = video.getSubtitleView();
         if (captions != null) captions.addOnLayoutChangeListener((view, l, t, r, b, ol, ot, or, ob) -> liftCaptions());
         updateActions(false, false, false, false, false);
-        showMessage("正在向服务端请求视频…");
+        message.setVisibility(GONE);
     }
 
     private TextView singleLine(String text, int size, int color, boolean bold) {
@@ -274,12 +349,89 @@ final class FullscreenPlaybackView extends FrameLayout {
                        boolean audioAvailable) {
         previous.setVisibility(episodic ? VISIBLE : GONE);
         next.setVisibility(episodic ? VISIBLE : GONE);
-        enable(previous, canGoBack);
-        enable(next, canGoNext);
-        enable(subtitles, textAvailable);
-        enable(audio, audioAvailable);
+        desiredPrevious = canGoBack;
+        desiredNext = canGoNext;
+        desiredText = textAvailable;
+        desiredAudio = audioAvailable;
+        applyPreparationGate();
         transportEnabled = textAvailable;
         refreshControls();
+    }
+
+    private void applyPreparationGate() {
+        enable(previous, !preparing && desiredPrevious);
+        enable(next, !preparing && desiredNext);
+        enable(subtitles, !preparing && desiredText);
+        enable(audio, !preparing && desiredAudio);
+    }
+
+    private void retryPreparation() {
+        if (!preparationFailed || retryPreparation == null) return;
+        preparationFailed = false;
+        preparationRetry.setEnabled(false);
+        retryPreparation.run();
+    }
+
+    void beginPreparation(View artwork, long position, long duration, Runnable retry) {
+        cancelPreparationTimers();
+        preparationGeneration++;
+        preparing = true;
+        preparationFailed = false;
+        retryPreparation = retry;
+        preparationPosition = position;
+        preparationDuration = duration;
+        dismissChoices();
+        message.setVisibility(GONE);
+        preparationCover.animate().cancel();
+        preparationCover.removeAllViews();
+        if (artwork != null) preparationCover.addView(artwork, new LayoutParams(-1, -1));
+        preparationCover.setBackground(shade(GradientDrawable.Orientation.TOP_BOTTOM, 0xff0a1218, 0xff020507));
+        preparationCover.setForeground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[] {0x8502070c, 0xa002070c, 0xda02070c}));
+        preparationCover.setAlpha(1f);
+        preparationCover.setVisibility(VISIBLE);
+        preparationSpinner.setVisibility(INVISIBLE);
+        preparationSlow.setVisibility(GONE);
+        preparationError.setVisibility(GONE);
+        preparationCenter.setVisibility(VISIBLE);
+        postDelayed(revealSpinner, 150);
+        postDelayed(revealSlow, 6000);
+        applyPreparationGate();
+        setControlsVisible(true);
+        fitSafeArea();
+        restartControlsTimeout();
+    }
+
+    void setPreparationPosition(long position) {
+        preparationPosition = position;
+        refreshControls();
+    }
+
+    void showPreparationFailure(String reason) {
+        cancelPreparationTimers();
+        preparationGeneration++;
+        preparing = true;
+        preparationFailed = true;
+        message.setVisibility(GONE);
+        preparationCover.animate().cancel();
+        preparationCover.setAlpha(1f);
+        preparationCover.setVisibility(VISIBLE);
+        preparationCenter.setVisibility(VISIBLE);
+        preparationSpinner.setVisibility(GONE);
+        preparationSlow.setVisibility(GONE);
+        preparationReason.setText(reason);
+        preparationError.setVisibility(VISIBLE);
+        preparationRetry.setEnabled(true);
+        applyPreparationGate();
+        refreshControls();
+        setControlsVisible(true);
+        fitSafeArea();
+        restartControlsTimeout();
+    }
+
+    private void cancelPreparationTimers() {
+        removeCallbacks(revealSpinner);
+        removeCallbacks(revealSlow);
     }
 
     private void enable(View button, boolean enabled) {
@@ -288,7 +440,7 @@ final class FullscreenPlaybackView extends FrameLayout {
     }
 
     private boolean canSeek() {
-        return transportEnabled && player != null && player.isCurrentMediaItemSeekable() && player.getDuration() > 0;
+        return !preparing && transportEnabled && player != null && player.isCurrentMediaItemSeekable() && player.getDuration() > 0;
     }
 
     private void bindScrubbing() {
@@ -329,7 +481,7 @@ final class FullscreenPlaybackView extends FrameLayout {
     }
 
     private void togglePlaying() {
-        if (!transportEnabled || player == null) return;
+        if (preparing || !transportEnabled || player == null) return;
         if (player.getPlaybackState() == Player.STATE_ENDED) {
             soughtToEnd = false;
             player.seekToDefaultPosition();
@@ -353,13 +505,15 @@ final class FullscreenPlaybackView extends FrameLayout {
     private void refreshControls() {
         boolean seekable = canSeek();
         if (timeline.isEnabled() != seekable) timeline.setEnabled(seekable);
+        timeline.setAlpha(preparing ? .45f : 1f);
+        counters.setAlpha(preparing ? .45f : 1f);
         enable(rewind, seekable);
         enable(forward, seekable);
-        enable(play, transportEnabled && player != null);
+        enable(play, !preparing && transportEnabled && player != null);
         setPlayingIcon(player != null && player.getPlayWhenReady() && player.getPlaybackState() != Player.STATE_ENDED);
         if (scrubbing) return;
-        long duration = player == null ? C.TIME_UNSET : player.getDuration();
-        long position = player == null ? 0 : player.getCurrentPosition();
+        long duration = preparing ? preparationDuration : player == null ? C.TIME_UNSET : player.getDuration();
+        long position = preparing ? preparationPosition : player == null ? 0 : player.getCurrentPosition();
         long buffer = player == null ? 0 : player.getBufferedPosition();
         if (duration != shownDuration) {
             shownDuration = duration;
@@ -393,6 +547,10 @@ final class FullscreenPlaybackView extends FrameLayout {
     }
 
     @Override protected void onDetachedFromWindow() {
+        cancelPreparationTimers();
+        preparationGeneration++;
+        preparationCover.animate().cancel();
+        retryPreparation = null;
         removeCallbacks(refresh);
         removeCallbacks(hideControls);
         touching = false;
@@ -423,12 +581,27 @@ final class FullscreenPlaybackView extends FrameLayout {
 
     void showVideo() {
         message.setVisibility(GONE);
-        refreshControls();
-        restartControlsTimeout();
+        cancelPreparationTimers();
+        preparationCenter.setVisibility(GONE);
+        int generation = ++preparationGeneration;
+        Runnable handoff = () -> {
+            if (generation != preparationGeneration) return;
+            preparationCover.setVisibility(GONE);
+            preparing = false;
+            preparationFailed = false;
+            fitSafeArea();
+            applyPreparationGate();
+            refreshControls();
+            restartControlsTimeout();
+        };
+        preparationCover.animate().cancel();
+        if (preparationCover.getVisibility() == VISIBLE && LoadingUi.animationsEnabled(getContext()))
+            preparationCover.animate().alpha(0f).setDuration(150).withEndAction(handoff).start();
+        else handoff.run();
     }
 
     private boolean controlsMustStayVisible() {
-        return player == null || !player.isPlaying() || message.getVisibility() == VISIBLE
+        return preparing || player == null || !player.isPlaying() || message.getVisibility() == VISIBLE
                 || scrubbing || activeTrackButton != null;
     }
 
@@ -470,8 +643,13 @@ final class FullscreenPlaybackView extends FrameLayout {
 
     private void fitSafeArea() {
         int gutter = dp(18);
-        header.setPadding(gutter + leftInset, dp(14) + topInset, gutter + rightInset, dp(20));
-        bottom.setPadding(gutter + leftInset, 0, gutter + rightInset, dp(14) + bottomInset);
+        boolean shortScreen = preparing && getHeight() - topInset - bottomInset < dp(420);
+        header.setPadding(gutter + leftInset, dp(14) + topInset, gutter + rightInset, dp(shortScreen ? 10 : 20));
+        bottom.setPadding(gutter + leftInset, 0, gutter + rightInset, dp(shortScreen ? 10 : 14) + bottomInset);
+        LinearLayout.LayoutParams timeBounds = (LinearLayout.LayoutParams) timeline.getLayoutParams();
+        timeBounds.height = dp(shortScreen ? 24 : 44);
+        timeline.setLayoutParams(timeBounds);
+        fitPreparation();
         boolean compact = getWidth() - leftInset - rightInset < dp(545);
         transportRow.setMinimumHeight(dp(100));
         LayoutParams counterBounds = (LayoutParams) counters.getLayoutParams();
@@ -483,6 +661,20 @@ final class FullscreenPlaybackView extends FrameLayout {
         panelBounds.width = Math.max(dp(160), Math.min(dp(360), getWidth() - leftInset - rightInset - 2 * gutter));
         trackPanel.setLayoutParams(panelBounds);
         fitTrackList();
+    }
+
+    private void fitPreparation() {
+        LayoutParams centerBounds = (LayoutParams) preparationCenter.getLayoutParams();
+        int top = Math.max(dp(80) + topInset, header.getHeight()) + dp(4);
+        int bottomMargin = Math.max(dp(128) + bottomInset, bottom.getHeight()) + dp(4);
+        int left = dp(18) + leftInset, right = dp(18) + rightInset;
+        if (centerBounds.topMargin == top && centerBounds.bottomMargin == bottomMargin
+                && centerBounds.leftMargin == left && centerBounds.rightMargin == right) return;
+        centerBounds.topMargin = top;
+        centerBounds.bottomMargin = bottomMargin;
+        centerBounds.leftMargin = left;
+        centerBounds.rightMargin = right;
+        preparationCenter.setLayoutParams(centerBounds);
     }
 
     private void liftCaptions() {

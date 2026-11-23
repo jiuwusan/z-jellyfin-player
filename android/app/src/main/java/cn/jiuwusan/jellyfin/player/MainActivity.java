@@ -1328,7 +1328,7 @@ public final class MainActivity extends Activity {
             stopPlayback();
             back.run();
         };
-        int expected = ++page;
+        ++page;
         backAction = close;
         android.util.DisplayMetrics metrics = getResources().getDisplayMetrics();
         PlaybackPolicy policy = PlaybackPolicy.fromSettings(settings.resolution, settings.bitrate,
@@ -1339,24 +1339,7 @@ public final class MainActivity extends Activity {
         enterFullscreenPlayback();
         current.screen.requestApplyInsets();
         current.loadNeighbors();
-        worker.execute(() -> {
-            try {
-                long resumeMs = startPosition == null ? item.resumeMs : startPosition;
-                if (startPosition == null) {
-                    try {
-                        // Search and library cards may still hold the progress from before playback.
-                        resumeMs = current.connection.details(item).resumeMs;
-                    } catch (Exception error) {
-                        Log.w(JellyfinApi.TAG, "Using saved card position because progress refresh failed");
-                    }
-                }
-                long position = resumeMs;
-                JellyfinApi.Stream resolved = current.connection.stream(item, policy);
-                onPage(expected, () -> startPlayback(resolved, current, position, true, false, null));
-            } catch (Exception error) {
-                onPage(expected, () -> current.screen.showMessage(message(error, "无法获取视频")));
-            }
-        });
+        current.requestInitial(startPosition == null ? item.resumeMs : startPosition, startPosition == null);
     }
 
     private final class PlaybackPage {
@@ -1370,6 +1353,12 @@ public final class MainActivity extends Activity {
         boolean foreground = true;
         boolean loggedSubtitle;
         boolean autoAdvancePending;
+        boolean preparationFailed;
+        int preparationRequest;
+        long retryPosition;
+        String retrySource;
+        Integer retryAudio;
+        TrackSelectionParameters retryParameters;
 
         PlaybackPage(JellyfinApi.Item item, PlaybackPolicy policy, Runnable close) {
             this.item = item;
@@ -1381,6 +1370,61 @@ public final class MainActivity extends Activity {
             screen = new FullscreenPlaybackView(MainActivity.this, libraryUi, resolution + " · " + bitrate, close,
                     () -> changeEpisode(previous), () -> changeEpisode(next), this::chooseSubtitle, this::chooseAudio);
             updateTitle();
+            updateActions();
+        }
+
+        void requestInitial(long position, boolean refreshPosition) {
+            final int request = ++preparationRequest;
+            final int expected = page;
+            preparationFailed = false;
+            autoAdvancePending = false;
+            retryPosition = position;
+            releasePlayer(true);
+            screen.beginPreparation(libraryUi.playbackBackdrop(item), position, item.durationMs,
+                    () -> requestInitial(retryPosition, false));
+            updateActions();
+            worker.execute(() -> {
+                long resume = position;
+                try {
+                    if (refreshPosition) {
+                        try { resume = connection.details(item).resumeMs; }
+                        catch (Exception ignored) {
+                            Log.w(JellyfinApi.TAG, "Using saved card position because progress refresh failed");
+                        }
+                    }
+                    long resolvedPosition = resume;
+                    onPage(expected, () -> {
+                        if (playback != this || preparationRequest != request) return;
+                        retryPosition = resolvedPosition;
+                        screen.setPreparationPosition(resolvedPosition);
+                    });
+                    JellyfinApi.Stream resolved = retrySource == null ? connection.stream(item, policy)
+                            : connection.stream(item, policy, retrySource, retryAudio);
+                    onPage(expected, () -> {
+                        if (playback != this || preparationRequest != request) return;
+                        startPlayback(resolved, this, resolvedPosition, true, false, retryParameters);
+                    });
+                } catch (Exception error) {
+                    onPage(expected, () -> {
+                        if (playback != this || preparationRequest != request) return;
+                        preparationFailed = true;
+                        Log.w(JellyfinApi.TAG, "Playback preparation request failed type=" + error.getClass().getSimpleName());
+                        screen.showPreparationFailure("暂时无法获取视频，请重试。");
+                        updateActions();
+                    });
+                }
+            });
+        }
+
+        void failPreparation(ExoPlayer active, JellyfinApi.Stream resolved) {
+            preparationFailed = true;
+            autoAdvancePending = false;
+            retryPosition = active.getCurrentPosition();
+            retrySource = resolved.sourceId;
+            retryAudio = resolved.audioIndex >= 0 ? resolved.audioIndex : null;
+            retryParameters = active.getTrackSelectionParameters();
+            screen.setPreparationPosition(retryPosition);
+            screen.showPreparationFailure("暂时无法播放，请重试。");
             updateActions();
         }
 
@@ -1426,7 +1470,7 @@ public final class MainActivity extends Activity {
         }
 
         boolean ready() {
-            return playback == this && change == null && player != null && stream != null && playbackStarted;
+            return playback == this && !preparationFailed && change == null && player != null && stream != null && playbackStarted;
         }
 
         void updateActions() {
@@ -1636,7 +1680,7 @@ public final class MainActivity extends Activity {
                         + " fps=" + input.frameRate + " averageBitrate=" + input.averageBitrate);
             }
             @Override public void onRenderedFirstFrame(EventTime time, Object output, long renderTimeMs) {
-                if (player != active || firstFrame) return;
+                if (player != active || playback != current || current.preparationFailed || firstFrame) return;
                 firstFrame = true;
                 playbackStarted = true;
                 current.finishSwitch(active.getCurrentPosition());
@@ -1693,7 +1737,7 @@ public final class MainActivity extends Activity {
                         if (player == active && current.change != null) current.recoverSwitch();
                     });
                 } else {
-                    screen.showMessage("播放失败 · " + code);
+                    current.failPreparation(active, resolved);
                 }
             }
         });

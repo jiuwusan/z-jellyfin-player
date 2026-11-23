@@ -26,7 +26,14 @@ public final class LoadingTransitionCheck extends Instrumentation {
     private final AtomicBoolean active = new AtomicBoolean(true);
     private final AtomicInteger retries = new AtomicInteger();
 
-    @Override public void onCreate(Bundle args) { super.onCreate(args); start(); }
+    private boolean playbackSuite;
+    private boolean realPlaybackSuite;
+    @Override public void onCreate(Bundle args) {
+        super.onCreate(args);
+        playbackSuite = args != null && "playback".equals(args.getString("suite"));
+        realPlaybackSuite = args != null && "playback-real".equals(args.getString("suite"));
+        start();
+    }
     private void check(boolean ok, String message) { if (!ok) throw new AssertionError(message); }
     private boolean hasText(View view, String text) {
         if (view instanceof TextView && ((TextView) view).getText().toString().contains(text)) return true;
@@ -48,6 +55,8 @@ public final class LoadingTransitionCheck extends Instrumentation {
         if (failure.get() != null) throw new AssertionError(failure.get());
     }
     @Override public void onStart() {
+        if (realPlaybackSuite) { new PlaybackLoadingRealCheck(this).run(); return; }
+        if (playbackSuite) { new PlaybackLoadingCheck(this).run(); return; }
         Bundle result = new Bundle();
         try {
             Intent intent = new Intent(Intent.ACTION_MAIN).setClassName(getTargetContext().getPackageName(), MainActivity.class.getName())
