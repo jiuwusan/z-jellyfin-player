@@ -18,6 +18,15 @@ final class PlaybackLoadingRealCheck {
     private final Instrumentation test;
     private Activity activity;
     private String decoder = "not captured";
+    private void waitOrientation(int requested, int configuration) {
+        java.util.concurrent.atomic.AtomicBoolean matches = new java.util.concurrent.atomic.AtomicBoolean();
+        for (int i = 0; i < 60 && !matches.get(); i++) {
+            ui(() -> matches.set(activity.getRequestedOrientation() == requested
+                    && activity.getResources().getConfiguration().orientation == configuration));
+            SystemClock.sleep(100);
+        }
+        check(matches.get(), "Screen did not enter expected orientation: " + configuration);
+    }
     PlaybackLoadingRealCheck(Instrumentation test) { this.test = test; }
     private void check(boolean ok, String reason) { if (!ok) throw new AssertionError(reason); }
     private Object field(Object target, String name) {
@@ -57,10 +66,17 @@ final class PlaybackLoadingRealCheck {
     }
     void run() {
         Bundle result = new Bundle();
+        int previousAutoRotation = android.provider.Settings.System.getInt(test.getTargetContext().getContentResolver(),
+                android.provider.Settings.System.ACCELEROMETER_ROTATION, 1);
+        int previousRotation = android.provider.Settings.System.getInt(test.getTargetContext().getContentResolver(),
+                android.provider.Settings.System.USER_ROTATION, 0);
         try {
             activity = test.startActivitySync(new Intent(Intent.ACTION_MAIN)
                     .setClassName(test.getTargetContext().getPackageName(), MainActivity.class.getName())
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK));
+            test.getUiAutomation().setRotation(android.app.UiAutomation.ROTATION_FREEZE_90);
+            waitOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT,
+                    android.content.res.Configuration.ORIENTATION_PORTRAIT);
             String saved = activity.getSharedPreferences("connection", 0).getString("sealed", null);
             check(saved != null, "Device has no saved connection");
             AtomicReference<JellyfinApi> connection = new AtomicReference<>();
@@ -80,6 +96,10 @@ final class PlaybackLoadingRealCheck {
             ui(() -> invoke(activity, "playbackPage", new Class<?>[]{JellyfinApi.Item.class, Long.class, Runnable.class},
                     item, Long.valueOf(item.resumeMs), (Runnable) () -> invoke(activity, "homePage", new Class<?>[]{})));
             ExoPlayer original = waitForFrame();
+            waitOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE,
+                    android.content.res.Configuration.ORIENTATION_LANDSCAPE);
+            ui(() -> check(!activity.getWindow().getDecorView().getRootWindowInsets().isVisible(
+                    android.view.WindowInsets.Type.systemBars()), "Playback system bars still visible"));
             final long[] retry = new long[1];
             final Object[] policy = new Object[1];
             ui(() -> {
@@ -110,13 +130,18 @@ final class PlaybackLoadingRealCheck {
                 check(field(activity, "playback") == null && field(activity, "player") == null, "Back left playback active");
             });
             SystemClock.sleep(1500);
+            waitOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT,
+                    android.content.res.Configuration.ORIENTATION_PORTRAIT);
             check(saved.equals(activity.getSharedPreferences("connection", 0).getString("sealed", null)), "Saved settings changed");
             result.putString("decoder", decoder);
-            result.putString("result", "ALL_PASS: saved proxy/login / real first frame / seek / failure-retry resume / quality / pause-play / back / unchanged settings");
+            result.putString("result", "ALL_PASS: portrait browsing despite landscape rotation / landscape fullscreen playback / portrait after back / proxy-login / first frame / retry-resume / unchanged settings");
             test.finish(Activity.RESULT_OK, result);
         } catch (Throwable e) {
             result.putString("failure", android.util.Log.getStackTraceString(e));
             test.finish(Activity.RESULT_CANCELED, result);
+        } finally {
+            test.getUiAutomation().setRotation(previousRotation);
+            if (previousAutoRotation == 1) test.getUiAutomation().setRotation(android.app.UiAutomation.ROTATION_UNFREEZE);
         }
     }
 }
