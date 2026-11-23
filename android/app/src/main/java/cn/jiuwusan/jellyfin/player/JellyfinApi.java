@@ -262,7 +262,12 @@ final class JellyfinApi {
     }
 
     Stream stream(Item item, PlaybackPolicy policy, String requestedSource, Integer audioIndex, int subtitleSelection) throws Exception {
-        JSONObject initial = playbackInfo(item, requestedSource, false, null, audioIndex, policy);
+        return stream(item, policy, requestedSource, audioIndex, subtitleSelection, -1);
+    }
+
+    Stream stream(Item item, PlaybackPolicy policy, String requestedSource, Integer audioIndex, int subtitleSelection, int forceSubtitleIndex) throws Exception {
+        boolean forceBurn = forceSubtitleIndex >= 0;
+        JSONObject initial = playbackInfo(item, requestedSource, forceBurn, forceBurn ? forceSubtitleIndex : null, audioIndex, policy, forceBurn);
         JSONArray sources = initial.optJSONArray("MediaSources");
         if (sources == null || sources.length() == 0) throw new IOException("没有可用片源");
         JSONObject source = requestedSource == null ? sources.getJSONObject(0) : findSource(initial, requestedSource);
@@ -272,18 +277,20 @@ final class JellyfinApi {
         int height = video.optInt("Height");
         boolean constrained = policy.requiresTranscode(width, height, source.optLong("Bitrate", video.optLong("BitRate")));
         int defaultSubtitle = source.optInt("DefaultSubtitleStreamIndex", -1);
-        int selectedSubtitle = subtitleSelection == PlaybackTracks.AUTO ? defaultSubtitle : subtitleSelection;
+        int selectedSubtitle = forceBurn ? forceSubtitleIndex : subtitleSelection == PlaybackTracks.AUTO ? defaultSubtitle : subtitleSelection;
         MediaTrack selectedTrack = PlaybackTracks.subtitleTrack(mediaTracks(item.id, source, "Subtitle"), selectedSubtitle);
-        int burnedSubtitle = selectedTrack != null && selectedTrack.burnIn ? selectedSubtitle : -1;
+        if (forceBurn && selectedTrack == null) throw new IOException("所选字幕已不可用");
+        int burnedSubtitle = forceBurn || selectedTrack != null && selectedTrack.burnIn ? selectedSubtitle : -1;
         boolean hls = burnedSubtitle >= 0 || audioIndex != null || constrained
                 || !source.optBoolean("SupportsDirectPlay") && !source.optBoolean("SupportsDirectStream");
         JSONObject info = hls ? playbackInfo(item, sourceId, constrained || audioIndex != null || burnedSubtitle >= 0,
-                selectedTrack != null && (selectedTrack.burnIn || "Embed".equals(selectedTrack.deliveryMethod)) ? selectedSubtitle : -1,
-                audioIndex, policy) : initial;
+                forceBurn || selectedTrack != null && (selectedTrack.burnIn || "Embed".equals(selectedTrack.deliveryMethod)) ? selectedSubtitle : -1,
+                audioIndex, policy, forceBurn) : initial;
         if (hls) {
             source = findSource(info, sourceId);
             selectedTrack = PlaybackTracks.subtitleTrack(mediaTracks(item.id, source, "Subtitle"), selectedSubtitle);
-            burnedSubtitle = selectedTrack != null && selectedTrack.burnIn ? selectedSubtitle : -1;
+            if (forceBurn && selectedTrack == null) throw new IOException("所选字幕已不可用");
+            burnedSubtitle = forceBurn || selectedTrack != null && selectedTrack.burnIn ? selectedSubtitle : -1;
         }
         String session = info.getString("PlaySessionId");
         HttpUrl streamUrl;
@@ -299,10 +306,10 @@ final class JellyfinApi {
             for (String key : resolved.queryParameterNames()) {
                 if ("SubtitleStreamIndex".equalsIgnoreCase(key) || "SubtitleMethod".equalsIgnoreCase(key)) request.removeAllQueryParameters(key);
             }
-            boolean serverSubtitle = selectedTrack != null && selectedTrack.available()
+            boolean serverSubtitle = forceBurn || selectedTrack != null && selectedTrack.available()
                     && (selectedTrack.burnIn || "Embed".equals(selectedTrack.deliveryMethod));
             request.setQueryParameter("SubtitleStreamIndex", Integer.toString(serverSubtitle ? selectedSubtitle : -1));
-            if (serverSubtitle) request.setQueryParameter("SubtitleMethod", selectedTrack.deliveryMethod);
+            if (serverSubtitle) request.setQueryParameter("SubtitleMethod", forceBurn ? "Encode" : selectedTrack.deliveryMethod);
             if (audioIndex != null) {
                 for (String key : resolved.queryParameterNames()) {
                     if ("AudioStreamIndex".equalsIgnoreCase(key)) request.removeAllQueryParameters(key);
@@ -453,8 +460,8 @@ final class JellyfinApi {
     }
 
     private JSONObject playbackInfo(Item item, String source, boolean constrained, Integer subtitleIndex,
-                                    Integer audioIndex, PlaybackPolicy policy) throws Exception {
-        JSONObject body = new JSONObject().put("UserId", userId).put("DeviceProfile", profile());
+                                    Integer audioIndex, PlaybackPolicy policy, boolean forceBurn) throws Exception {
+        JSONObject body = new JSONObject().put("UserId", userId).put("DeviceProfile", profile(forceBurn));
         if (policy.totalBitrate > 0) body.put("MaxStreamingBitrate", policy.totalBitrate);
         if (source != null) body.put("MediaSourceId", source);
         if (audioIndex != null) body.put("AudioStreamIndex", audioIndex);
@@ -466,17 +473,17 @@ final class JellyfinApi {
         return json("播放协商", url("Items/" + item.id + "/PlaybackInfo").build(), body);
     }
 
-    private static JSONObject profile() throws Exception {
+    private static JSONObject profile(boolean forceBurn) throws Exception {
         JSONObject direct = new JSONObject().put("Type", "Video").put("Container", "mp4,mkv")
                 .put("VideoCodec", "h264,hevc").put("AudioCodec", "aac,mp3,ac3,eac3,opus");
         JSONObject transcode = new JSONObject().put("Type", "Video").put("Context", "Streaming")
                 .put("Protocol", "hls").put("Container", "ts").put("VideoCodec", "h264").put("AudioCodec", "aac");
         JSONArray subtitles = new JSONArray();
-        for (String format : new String[] { "srt", "subrip", "ttml" }) {
+        for (String format : forceBurn ? new String[0] : new String[] { "srt", "subrip", "ttml" }) {
             subtitles.put(new JSONObject().put("Format", format).put("Method", "Embed"));
         }
         for (String format : new String[] { "srt", "subrip", "vtt", "webvtt", "ass", "ssa", "ttml" }) {
-            subtitles.put(new JSONObject().put("Format", format).put("Method", "External"));
+            subtitles.put(new JSONObject().put("Format", format).put("Method", forceBurn ? "Encode" : "External"));
         }
         for (String format : new String[] { "pgssub", "pgs", "hdmv_pgs_subtitle", "dvdsub", "vobsub", "dvbsub", "xsub" }) {
             subtitles.put(new JSONObject().put("Format", format).put("Method", "Encode"));
@@ -511,10 +518,15 @@ final class JellyfinApi {
                 .header("Accept", "application/json");
         if (body != null) request.post(RequestBody.create(body.toString(), MediaType.get("application/json")));
         try (Response response = http.newCall(request.build()).execute()) {
-            if (response.code() == 407) throw new IOException("HTTP 代理认证失败，请检查代理账号和密码。");
-            if (!response.isSuccessful()) throw new IOException(operation + "失败，HTTP " + response.code());
+            if (response.code() == 407) throw new HttpFailure("HTTP 代理认证失败，请检查代理账号和密码。", response.code());
+            if (!response.isSuccessful()) throw new HttpFailure(operation + "失败，HTTP " + response.code(), response.code());
             return response.body() == null ? "" : response.body().string();
         }
+    }
+
+    static final class HttpFailure extends IOException {
+        final int status;
+        HttpFailure(String message, int status) { super(message); this.status = status; }
     }
 
     static final class Item {

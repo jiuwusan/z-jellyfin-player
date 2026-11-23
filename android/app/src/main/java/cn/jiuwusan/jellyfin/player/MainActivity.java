@@ -52,6 +52,7 @@ import androidx.media3.datasource.okhttp.OkHttpDataSource;
 import androidx.media3.exoplayer.DecoderReuseEvaluation;
 import androidx.media3.exoplayer.DefaultRenderersFactory;
 import androidx.media3.exoplayer.ExoPlayer;
+import androidx.media3.exoplayer.ExoPlaybackException;
 import androidx.media3.exoplayer.analytics.AnalyticsListener;
 import androidx.media3.exoplayer.mediacodec.MediaCodecInfo;
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector;
@@ -62,6 +63,8 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.io.IOException;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -1484,6 +1487,9 @@ public final class MainActivity extends Activity {
         boolean loggedSubtitle;
         boolean autoAdvancePending;
         boolean preparationFailed;
+        final SubtitleRecovery subtitleRecovery = new SubtitleRecovery();
+        final Set<Integer> failedSubtitles = new HashSet<>();
+        JellyfinApi.Stream recoveryOriginal;
         int preparationRequest;
         long retryPosition;
         String retrySource;
@@ -1618,7 +1624,7 @@ public final class MainActivity extends Activity {
             int selected = subtitle == PlaybackTracks.OFF ? 1 : 0;
             for (JellyfinApi.MediaTrack option : current.subtitles) {
                 if (localSubtitle == null && subtitle == option.index) selected = labels.size();
-                labels.add(option.label + (option.available() ? "" : " · 暂不可用"));
+                labels.add(option.label + (failedSubtitles.contains(option.index) ? " · 点击重试" : option.available() ? "" : " · 暂不可用"));
             }
             List<PlaybackTracks.LocalTrack> embedded = new ArrayList<>();
             if (current.subtitles.isEmpty()) {
@@ -1653,9 +1659,21 @@ public final class MainActivity extends Activity {
                     return;
                 }
             }
+            int desired = requested == PlaybackTracks.AUTO ? stream.defaultSubtitleIndex : requested;
+            boolean retryFailed = desired >= 0 && failedSubtitles.remove(desired);
+            if (retryFailed) {
+                subtitleRecovery.reset(desired);
+                recoveryOriginal = null;
+                switchTo(item, null, requested, local);
+                return;
+            }
             int burned = local == null ? PlaybackTracks.burnInIndex(stream.subtitles, stream.defaultSubtitleIndex, requested) : -1;
             if (burned != stream.burnedSubtitleIndex) {
                 switchTo(item, null, requested, local);
+                return;
+            }
+            if (PlaybackTracks.externalSubtitleIndex(stream, requested) != PlaybackTracks.externalSubtitleIndex(stream, subtitle)) {
+                switchTo(item, null, requested, local, -1, null, true);
                 return;
             }
             subtitle = requested;
@@ -1663,6 +1681,50 @@ public final class MainActivity extends Activity {
             loggedSubtitle = false;
             PlaybackTracks.setSubtitle(player, player.getCurrentTracks(), stream, subtitle, localSubtitle);
             Log.i(JellyfinApi.TAG, "Subtitle selection index=" + subtitle + " local=" + (localSubtitle != null));
+        }
+
+        void subtitleFailed(ExoPlayer active, JellyfinApi.Stream failed, int index, IOException error) {
+            if (playback != this || player != active || stream != failed || preparationFailed || index < 0) return;
+            PlaybackChange pending = change;
+            if (pending != null) {
+                if (pending.recoveryAction == null) { recoverSwitch(); return; }
+                if (!pending.replaced) return; // Duplicate terminal callback from the old player while negotiating.
+                if (pending.recoveryAction == SubtitleRecovery.Action.DISABLE) {
+                    change = null;
+                    failPreparation(active, failed);
+                    return;
+                }
+                if (pending.previous != failed) enqueueReport(connection, pending.previous, "Stopped", pending.position, !pending.playWhenReady);
+                change = null;
+            } else {
+                int selected = subtitle == PlaybackTracks.AUTO ? failed.defaultSubtitleIndex : subtitle;
+                if (subtitle == PlaybackTracks.OFF || index != selected) return;
+                recoveryOriginal = failed;
+            }
+            boolean play = pending == null ? active.getPlayWhenReady() : pending.playWhenReady;
+            long position = pending == null ? active.getCurrentPosition() : pending.position;
+            SubtitleRecovery.Action action = subtitleRecovery.next(index, error);
+            failedSubtitles.add(index);
+            int choice = action == SubtitleRecovery.Action.DISABLE ? PlaybackTracks.OFF : subtitle;
+            switchTo(item, null, choice, null, action == SubtitleRecovery.Action.BURN ? index : -1, action, false);
+            change.position = Math.max(0, position);
+            change.playWhenReady = play && foreground;
+            change.recoveryIndex = index;
+            if (action == SubtitleRecovery.Action.DISABLE)
+                Toast.makeText(MainActivity.this, "字幕加载失败，已关闭；可在字幕菜单重新选择重试。", Toast.LENGTH_LONG).show();
+            Log.i(JellyfinApi.TAG, "Subtitle recovery index=" + index + " action=" + action);
+        }
+
+        void failedSubtitleSwitch(PlaybackChange pending, Exception error) {
+            if (change != pending) return;
+            if (pending.recoveryAction == SubtitleRecovery.Action.DISABLE) {
+                change = null;
+                failPreparation(player, stream);
+                return;
+            }
+            // No new player was installed if negotiation failed. Allow the bounded next recovery stage.
+            pending.replaced = true;
+            subtitleFailed(player, stream, pending.recoveryIndex, error instanceof IOException ? (IOException) error : new IOException(error));
         }
 
         void chooseAudio() {
@@ -1712,15 +1774,24 @@ public final class MainActivity extends Activity {
         }
 
         void switchTo(JellyfinApi.Item target, Integer audioIndex, int requestedSubtitle, PlaybackTracks.LocalTrack requestedLocal) {
+            switchTo(target, audioIndex, requestedSubtitle, requestedLocal, -1, null, false);
+        }
+
+        void switchTo(JellyfinApi.Item target, Integer audioIndex, int requestedSubtitle, PlaybackTracks.LocalTrack requestedLocal,
+                      int forceSubtitleIndex, SubtitleRecovery.Action recoveryAction, boolean reuseStream) {
             boolean sameEpisode = target == item;
             PlaybackChange pending = new PlaybackChange(stream, target, player.getCurrentPosition(),
                     player.getPlayWhenReady(), player.getPlaybackState() == Player.STATE_ENDED,
                     subtitle, localSubtitle, player.getTrackSelectionParameters());
             autoAdvancePending = false;
             change = pending;
+            pending.recoveryAction = recoveryAction;
+            pending.wasReported = playbackStarted;
             player.pause();
             updateActions();
-            screen.showMessage(!sameEpisode ? "正在切换剧集…"
+            screen.showMessage(recoveryAction == SubtitleRecovery.Action.REFRESH ? "正在重新加载字幕…"
+                    : recoveryAction == SubtitleRecovery.Action.BURN ? "正在切换服务端字幕…"
+                    : recoveryAction == SubtitleRecovery.Action.DISABLE ? "正在关闭不可用字幕…" : !sameEpisode ? "正在切换剧集…"
                     : requestedSubtitle != subtitle || requestedLocal != localSubtitle ? "正在切换字幕…" : "正在切换音轨…");
             int targetSubtitle = sameEpisode ? requestedSubtitle
                     : pending.subtitle == PlaybackTracks.OFF ? PlaybackTracks.OFF : PlaybackTracks.AUTO;
@@ -1728,20 +1799,26 @@ public final class MainActivity extends Activity {
                     : pending.previous.audioIndex >= 0 ? pending.previous.audioIndex : null : null;
             browse.execute(() -> {
                 try {
-                    JellyfinApi.Stream resolved = sameEpisode
-                            ? connection.stream(target, policy, pending.previous.sourceId, targetAudio, targetSubtitle)
+                    JellyfinApi.Stream resolved = recoveryAction == SubtitleRecovery.Action.DISABLE ? recoveryOriginal
+                            : reuseStream ? pending.previous : sameEpisode
+                            ? connection.stream(target, policy, pending.previous.sourceId, targetAudio, targetSubtitle, forceSubtitleIndex)
                             : connection.stream(target, policy, null, null, targetSubtitle);
                     ui.post(() -> {
                         if (playback != this || change != pending) return;
                         releasePlayer(false);
+                        pending.replaced = true;
                         subtitle = targetSubtitle;
                         localSubtitle = sameEpisode ? requestedLocal : null;
                         long position = sameEpisode ? pending.position : target.resumeMs;
-                        startPlayback(resolved, this, position, pending.playWhenReady, false, null);
+                        startPlayback(resolved, this, position, pending.playWhenReady,
+                                resolved == pending.previous && pending.wasReported, null);
                     });
                 } catch (Exception error) {
                     ui.post(() -> {
-                        if (playback == this && change == pending) recoverSwitch();
+                        if (playback == this && change == pending) {
+                            if (pending.recoveryAction != null) failedSubtitleSwitch(pending, error);
+                            else recoverSwitch();
+                        }
                     });
                 }
             });
@@ -1753,7 +1830,7 @@ public final class MainActivity extends Activity {
             subtitle = pending.subtitle;
             localSubtitle = pending.localSubtitle;
             boolean resume = pending.playWhenReady && !pending.endedBeforeSwitch;
-            if (stream == pending.previous) {
+            if (!pending.replaced) {
                 player.setPlayWhenReady(resume && foreground);
                 screen.showVideo();
                 updateActions();
@@ -1768,8 +1845,11 @@ public final class MainActivity extends Activity {
             if (change == null) return;
             PlaybackChange pending = change;
             change = null;
-            enqueueReport(connection, pending.previous, "Stopped", pending.position, !pending.playWhenReady);
+            if (stream != pending.previous) enqueueReport(connection, pending.previous, "Stopped", pending.position, !pending.playWhenReady);
             if (pending.target != item) {
+                subtitleRecovery.clear();
+                failedSubtitles.clear();
+                recoveryOriginal = null;
                 item = pending.target;
                 updateTitle();
                 loadNeighbors();
@@ -1782,12 +1862,15 @@ public final class MainActivity extends Activity {
     private static final class PlaybackChange {
         final JellyfinApi.Stream previous;
         final JellyfinApi.Item target;
-        final long position;
+        long position;
         final boolean endedBeforeSwitch;
         final int subtitle;
         final PlaybackTracks.LocalTrack localSubtitle;
         final TrackSelectionParameters parameters;
         boolean playWhenReady;
+        boolean replaced, wasReported;
+        SubtitleRecovery.Action recoveryAction;
+        int recoveryIndex = -1;
 
         PlaybackChange(JellyfinApi.Stream previous, JellyfinApi.Item target, long position, boolean playWhenReady,
                        boolean endedBeforeSwitch, int subtitle, PlaybackTracks.LocalTrack localSubtitle,
@@ -1821,8 +1904,19 @@ public final class MainActivity extends Activity {
                 });
         OkHttpDataSource.Factory data = new OkHttpDataSource.Factory(current.connection.client())
                 .setDefaultRequestProperties(Collections.singletonMap("Authorization", current.connection.authorization()));
+        int externalIndex = PlaybackTracks.externalSubtitleIndex(resolved, current.subtitle);
+        JellyfinApi.MediaTrack external = PlaybackTracks.subtitleTrack(resolved.subtitles, externalIndex);
+        android.net.Uri subtitleUri = external == null ? null : android.net.Uri.parse(external.subtitleUrl.toString());
+        AtomicReference<ExoPlayer> playerReference = new AtomicReference<>();
+        AtomicReference<IOException> subtitleLoadError = new AtomicReference<>();
+        SubtitleLoadPolicy loadPolicy = new SubtitleLoadPolicy(subtitleUri, error -> {
+            subtitleLoadError.set(error);
+            ui.post(() -> current.subtitleFailed(playerReference.get(), resolved, externalIndex, error));
+        });
         ExoPlayer active = new ExoPlayer.Builder(this, renderers)
-                .setMediaSourceFactory(new DefaultMediaSourceFactory(data)).build();
+                .setMediaSourceFactory(new DefaultMediaSourceFactory(() -> new SubtitleDataSource(data.createDataSource(), subtitleUri))
+                        .setLoadErrorHandlingPolicy(loadPolicy)).build();
+        playerReference.set(active);
         player = active;
         screen.setPlayer(active);
         if (restored != null) active.setTrackSelectionParameters(restored);
@@ -1889,6 +1983,29 @@ public final class MainActivity extends Activity {
                 String code = error.getErrorCodeName();
                 Log.w(JellyfinApi.TAG, "Playback error " + code);
                 if (player != active) return;
+                if (subtitleLoadError.get() != null) {
+                    current.subtitleFailed(active, resolved, externalIndex, subtitleLoadError.get());
+                    return;
+                }
+                if (error instanceof ExoPlaybackException && resolved.burnedSubtitleIndex < 0) {
+                    Format failedFormat = ((ExoPlaybackException) error).rendererFormat;
+                    if (failedFormat != null && MimeTypes.isText(failedFormat.sampleMimeType)) {
+                        int index = current.subtitle == PlaybackTracks.AUTO ? resolved.defaultSubtitleIndex : current.subtitle;
+                        current.subtitleFailed(active, resolved, index, new IOException(error));
+                        return;
+                    }
+                }
+                if (current.change != null && current.change.recoveryAction != null) {
+                    if (current.change.recoveryAction == SubtitleRecovery.Action.BURN) {
+                        current.subtitleFailed(active, resolved, current.change.recoveryIndex, new IOException(error));
+                    } else {
+                        PlaybackChange pending = current.change;
+                        current.change = null;
+                        if (pending.previous != resolved) enqueueReport(current.connection, pending.previous, "Stopped", pending.position, !pending.playWhenReady);
+                        current.failPreparation(active, resolved);
+                    }
+                    return;
+                }
                 if (current.change != null) {
                     ui.post(() -> {
                         if (player == active && current.change != null) current.recoverSwitch();
@@ -1898,7 +2015,7 @@ public final class MainActivity extends Activity {
                 }
             }
         });
-        active.setMediaItem(PlaybackTracks.mediaItem(resolved), resumeMs);
+        active.setMediaItem(PlaybackTracks.mediaItem(resolved, current.subtitle), resumeMs);
         PlaybackTracks.setSubtitle(active, Tracks.EMPTY, resolved, current.subtitle, current.localSubtitle);
         if (resumeMs > 0) Log.i(JellyfinApi.TAG, "Requested resume position ms=" + resumeMs);
         Log.i(JellyfinApi.TAG, "Starting playback audioIndex=" + resolved.audioIndex);

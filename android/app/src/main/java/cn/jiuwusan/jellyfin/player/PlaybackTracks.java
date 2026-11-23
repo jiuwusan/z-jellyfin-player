@@ -19,10 +19,15 @@ final class PlaybackTracks {
     static final int OFF = -1;
 
     static MediaItem mediaItem(JellyfinApi.Stream stream) {
+        return mediaItem(stream, Integer.MIN_VALUE);
+    }
+
+    static MediaItem mediaItem(JellyfinApi.Stream stream, int selection) {
         MediaItem.Builder item = new MediaItem.Builder().setUri(stream.url.toString());
         if (stream.hls) item.setMimeType(MimeTypes.APPLICATION_M3U8);
         List<MediaItem.SubtitleConfiguration> subtitles = new ArrayList<>();
         for (JellyfinApi.MediaTrack track : stream.subtitles) {
+            if (selection != Integer.MIN_VALUE && (stream.burnedSubtitleIndex >= 0 || track.index != externalSubtitleIndex(stream, selection))) continue;
             if (!"External".equals(track.deliveryMethod) || !track.available()) continue;
             String mime = subtitleMime(track.format);
             subtitles.add(new MediaItem.SubtitleConfiguration.Builder(Uri.parse(track.subtitleUrl.toString()))
@@ -30,6 +35,12 @@ final class PlaybackTracks {
                     .setMimeType(mime).build());
         }
         return item.setSubtitleConfigurations(subtitles).build();
+    }
+
+    static int externalSubtitleIndex(JellyfinApi.Stream stream, int selection) {
+        int index = selection == AUTO ? stream.defaultSubtitleIndex : selection;
+        JellyfinApi.MediaTrack track = subtitleTrack(stream.subtitles, index);
+        return stream.burnedSubtitleIndex < 0 && track != null && track.available() && "External".equals(track.deliveryMethod) ? index : -1;
     }
 
     static List<LocalTrack> supported(Tracks tracks, int type) {
