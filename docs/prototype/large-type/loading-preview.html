@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>z-jellyfin · 加载过渡设计预览</title>
+<link rel="icon" href="../app-icon.png">
+<link rel="stylesheet" href="large-type.css">
+<link rel="stylesheet" href="loading-preview.css">
+</head>
+<body>
+<div class="desktop loadingReview">
+ <aside class="notes" aria-label="加载设计评审控制">
+  <h1>加载过渡<span>大字版 · 设计提案</span></h1>
+  <p class="designIntro">首次用骨架，刷新留内容，分页只动底部。以下控件只用于评审，不出现在 App。</p>
+  <fieldset><legend>页面</legend><div id="page-options" class="reviewOptions"></div></fieldset>
+  <fieldset><legend>加载场景</legend><div id="phase-options" class="reviewOptions"></div></fieldset>
+  <fieldset><legend>查看状态</legend><div id="state-options" class="reviewOptions"></div></fieldset>
+  <div class="reviewOptions"><button id="replay" class="demoAction">演示加载完成</button><button id="home-example" class="demoAction">切换最近添加示例</button></div>
+  <p id="review-note" class="reviewNote"></p>
+  <a class="jump" href="home-resume.html">返回继续观看设计稿 <span>↗</span></a>
+  <a class="jump" href="home-latest.html">查看最近添加设计稿 <span>↗</span></a>
+ </aside>
+ <div class="shell" aria-label="加载过渡手机设计稿">
+  <header class="top"></header>
+  <div id="library-filters" hidden></div>
+  <div id="refresh-indicator" hidden></div>
+  <main></main>
+  <div id="inline-notice" hidden></div>
+  <nav class="bottom" aria-label="主导航"></nav>
+ </div>
+</div>
+<script src="loading-preview.js"></script>
+</body>
+</html>

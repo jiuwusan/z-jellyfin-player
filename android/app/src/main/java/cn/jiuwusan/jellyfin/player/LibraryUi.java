@@ -59,6 +59,8 @@ final class LibraryUi {
         cache.evictAll();
     }
 
+    Context context() { return context; }
+
     int dp(int size) { return Math.round(context.getResources().getDisplayMetrics().density * size); }
 
     LinearLayout column() {
@@ -292,10 +294,6 @@ final class LibraryUi {
         FrameLayout cover = new FrameLayout(context);
         cover.setBackground(rounded(PANEL, radius));
         cover.setClipToOutline(true);
-        TextView placeholder = label(item.folder && !item.series ? "▤" : "▶", 23, MUTED, false);
-        placeholder.setGravity(Gravity.CENTER);
-        placeholder.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        cover.addView(placeholder, new FrameLayout.LayoutParams(-1, -1));
         ImageView image = new ImageView(context);
         image.setScaleType(ImageView.ScaleType.CENTER_CROP);
         image.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
@@ -317,6 +315,7 @@ final class LibraryUi {
                             if (connection != client) return;
                             cache.put(cacheKey, bitmap);
                             image.setImageBitmap(bitmap);
+                            LoadingUi.ready(image);
                         });
                     } catch (IOException ignored) {
                         // The placeholder remains usable on failed image requests.

@@ -486,6 +486,7 @@ public final class MainActivity extends Activity {
         private final SwipeRefreshLayout refresh;
         private final int expected = page;
         private boolean loading, loaded;
+        private final LoadingUi.RefreshNotice notice;
 
         HomeListing(LinearLayout view) {
             this.view = view;
@@ -500,6 +501,8 @@ public final class MainActivity extends Activity {
             refresh.setProgressBackgroundColorSchemeColor(LibraryUi.PANEL);
             refresh.addView(scroll, new android.view.ViewGroup.LayoutParams(-1, -1));
             root.addView(refresh, index, bounds);
+            notice = new LoadingUi.RefreshNotice(root, refresh, libraryUi, ui,
+                    () -> page == expected && loading, () -> load(true));
             refresh.setOnChildScrollUpCallback((parent, child) ->
                     loading || homePlayLoading || scroll.canScrollVertically(-1));
             refresh.setOnRefreshListener(() -> load(true));
@@ -509,8 +512,10 @@ public final class MainActivity extends Activity {
             if (page != expected || loading) return;
             loading = true;
             if (!loaded) view.removeAllViews();
-            TextView state = loaded ? null : text(view, "正在加载…");
-            if (requestedRefresh) refresh.setRefreshing(true);
+            boolean first = !loaded;
+            LoadingUi.Pending pending = first ? new LoadingUi.Pending(view, libraryUi, ui, LoadingUi.Kind.HOME, null,
+                    () -> page == expected && loading) : null;
+            if (requestedRefresh) { refresh.setRefreshing(true); notice.start(); }
             JellyfinApi connection = api;
             browse.execute(() -> {
                 try {
@@ -529,12 +534,13 @@ public final class MainActivity extends Activity {
                         }
                     });
                     onPage(expected, () -> {
+                        if (pending != null) pending.finish();
                         view.removeAllViews();
                         TextView heading = libraryUi.label(result.resume ? "继续观看" : "最近添加", 26, LibraryUi.TEXT, true);
                         heading.setPadding(0, 0, 0, dp(16));
                         view.addView(heading);
                         if (result.items.isEmpty()) {
-                            text(view, "暂无可播放的影片。");
+                            LoadingUi.empty(view, libraryUi, "暂无可播放的影片", "续播记录和最近添加均为空。");
                         } else {
                             view.addView(libraryUi.homeList(result.items, result.resume, screenWidth(),
                                     item -> openHomeDetails(item), item -> playHomeItem(item)));
@@ -542,6 +548,8 @@ public final class MainActivity extends Activity {
                         loaded = true;
                         loading = false;
                         refresh.setRefreshing(false);
+                        notice.clear();
+                        if (first) LoadingUi.ready(view);
                         scroll.scrollTo(0, 0);
                         Log.i(JellyfinApi.TAG, "Home section=" + (result.resume ? "RESUME" : "LATEST")
                                 + " items=" + result.items.size() + " refresh=" + requestedRefresh);
@@ -550,13 +558,9 @@ public final class MainActivity extends Activity {
                     onPage(expected, () -> {
                         loading = false;
                         refresh.setRefreshing(false);
-                        if (loaded) {
-                            android.widget.Toast.makeText(MainActivity.this,
-                                    message(error, "刷新首页失败，请下拉重试"), android.widget.Toast.LENGTH_LONG).show();
-                        } else {
-                            state.setText(message(error, "读取首页失败"));
-                            button(view, "重试", () -> load(false));
-                        }
+                        if (pending != null) pending.finish();
+                        if (loaded) notice.failed(message(error, "请检查网络后重试。"));
+                        else LoadingUi.failure(view, libraryUi, message(error, "读取首页失败"), () -> load(false), false);
                     });
                 }
             });
@@ -618,8 +622,8 @@ public final class MainActivity extends Activity {
             showCatalog(view, catalog);
             return;
         }
-        TextView state = text(view, "正在加载…");
         int expected = page;
+        LoadingUi.Pending pending = new LoadingUi.Pending(view, libraryUi, ui, LoadingUi.Kind.GRID, null, () -> page == expected);
         JellyfinApi connection = api;
         browse.execute(() -> {
             try {
@@ -630,13 +634,14 @@ public final class MainActivity extends Activity {
                     }
                 }
                 onPage(expected, () -> {
-                    view.removeView(state);
+                    if (pending.wasShown()) view.setTag(R.id.loading_handoff, true);
+                    pending.finish();
                     showCatalog(view, loaded);
                 });
             } catch (Exception error) {
                 onPage(expected, () -> {
-                    state.setText(message(error, "读取媒体库失败"));
-                    button(view, "重试", this::librariesPage);
+                    pending.finish();
+                    LoadingUi.failure(view, libraryUi, message(error, "读取媒体库失败"), this::librariesPage, false);
                 });
             }
         });
@@ -710,11 +715,16 @@ public final class MainActivity extends Activity {
         private final Runnable reopen;
         private final int expected = page;
         private final int gridWidth = screenWidth();
+        private final LoadingUi.RefreshNotice notice;
         private boolean loading;
         private boolean failed;
 
         LibraryListing(LinearLayout view, LibraryLocation location, Runnable reopen) {
             this.view = view;
+            if (Boolean.TRUE.equals(view.getTag(R.id.loading_handoff))) {
+                grid.setTag(R.id.loading_handoff, true);
+                view.setTag(R.id.loading_handoff, null);
+            }
             this.scroll = (ScrollView) view.getParent();
             LinearLayout root = (LinearLayout) scroll.getParent();
             int index = root.indexOfChild(scroll);
@@ -725,6 +735,9 @@ public final class MainActivity extends Activity {
             refresh.setProgressBackgroundColorSchemeColor(LibraryUi.PANEL);
             refresh.addView(scroll, new android.view.ViewGroup.LayoutParams(-1, -1));
             root.addView(refresh, index, bounds);
+            notice = new LoadingUi.RefreshNotice(root, refresh, libraryUi, ui,
+                    () -> page == expected && loading, () -> load(true));
+            footer.setMinimumHeight(dp(64));
             refresh.setOnChildScrollUpCallback((parent, child) -> loading || scroll.canScrollVertically(-1));
             refresh.setOnRefreshListener(() -> load(true));
             this.location = location;
@@ -764,7 +777,11 @@ public final class MainActivity extends Activity {
                 openItem(item, reopen);
             });
             footer.removeAllViews();
-            if (location.items.isEmpty()) text(footer, "这个媒体库暂无内容。");
+            if (location.items.isEmpty()) {
+                grid.removeAllViews();
+                LoadingUi.empty(grid, libraryUi, "这个媒体库暂无内容", "可以切换其他媒体库查看。");
+            }
+            else if (!location.more) footer.addView(LoadingUi.line(libraryUi, "已显示全部", false));
         }
 
         private void load() {
@@ -777,14 +794,18 @@ public final class MainActivity extends Activity {
             failed = false;
             int offset = replace ? 0 : location.items.size();
             footer.removeAllViews();
-            TextView status = text(footer, replace ? "正在刷新…" : offset == 0 ? "正在加载…" : "正在加载更多…");
-            if (replace) refresh.setRefreshing(true);
-            status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+            boolean first = !location.loaded;
+            if (first) grid.removeAllViews();
+            LoadingUi.Pending pending = first ? new LoadingUi.Pending(grid, libraryUi, ui, LoadingUi.Kind.GRID, null,
+                    () -> page == expected && loading) : !replace ? new LoadingUi.Pending(footer, libraryUi, ui, LoadingUi.Kind.FOOTER, null,
+                    () -> page == expected && loading) : null;
+            if (replace) { refresh.setRefreshing(true); notice.start(); } else notice.clear();
             JellyfinApi connection = api;
             browse.execute(() -> {
                 try {
                     JellyfinApi.LibraryItemsPage next = connection.libraryItems(location.folder, location.catalog, offset);
                     onPage(expected, () -> {
+                        if (pending != null) pending.finish();
                         if (replace) {
                             location.items.clear();
                             location.scrollY = 0;
@@ -797,6 +818,8 @@ public final class MainActivity extends Activity {
                         appendItems(offset);
                         loading = false;
                         refresh.setRefreshing(false);
+                        notice.clear();
+                        if (first) LoadingUi.ready(grid);
                         Log.i(JellyfinApi.TAG, "Library page offset=" + offset + " items=" + next.items.size()
                                 + " more=" + next.more + " refresh=" + replace);
                     });
@@ -805,8 +828,12 @@ public final class MainActivity extends Activity {
                         loading = false;
                         refresh.setRefreshing(false);
                         failed = true;
-                        status.setText(message(error, replace ? "刷新媒体库失败" : offset == 0 ? "读取媒体库失败" : "读取下一页失败"));
-                        button(footer, "重试", () -> load(replace));
+                        if (pending != null) pending.finish();
+                        if (replace && location.loaded) {
+                            notice.failed(message(error, "请检查网络后重试。"));
+                            if (!location.more) footer.addView(LoadingUi.line(libraryUi, "已显示全部", false));
+                        } else LoadingUi.failure(first ? grid : footer, libraryUi,
+                                message(error, first ? "读取媒体库失败" : "读取下一页失败"), () -> load(replace), !first);
                     });
                 }
             });
@@ -827,19 +854,22 @@ public final class MainActivity extends Activity {
         stopPlayback();
         LinearLayout view = panel("媒体详情", true, back, browseTab);
         int expected = page;
-        TextView state = text(view, "正在读取影片详情…");
+        view.setPadding(0, 0, 0, dp(24));
+        String title = "Episode".equals(initial.type) ? initial.seriesName : initial.title;
+        LoadingUi.Pending pending = new LoadingUi.Pending(view, libraryUi, ui, LoadingUi.Kind.DETAIL, title, () -> page == expected);
         JellyfinApi connection = api;
         worker.execute(() -> {
             try {
                 JellyfinApi.Item item = connection.details("Episode".equals(initial.type) ? initial.seriesId : initial.id);
                 onPage(expected, () -> {
-                    view.removeView(state);
+                    pending.finish();
                     showDetails(view, item, back, seasonId);
+                    LoadingUi.ready(view);
                 });
             } catch (Exception error) {
                 onPage(expected, () -> {
-                    state.setText(message(error, "读取影片详情失败"));
-                    button(view, "重试", () -> detailsPage(initial, back, seasonId));
+                    pending.finish();
+                    LoadingUi.failure(view, libraryUi, message(error, "读取影片详情失败"), () -> detailsPage(initial, back, seasonId), false);
                 });
             }
         });
@@ -1002,6 +1032,15 @@ public final class MainActivity extends Activity {
         search.setBackground(inputOutline());
         search.setImeOptions(EditorInfo.IME_ACTION_SEARCH);
         search.setSelection(search.length());
+        // Keep the query outside the results scroller so loading and scrolling cannot hide it.
+        ScrollView resultsScroll = (ScrollView) view.getParent();
+        LinearLayout searchRoot = (LinearLayout) resultsScroll.getParent();
+        LinearLayout searchHeader = column();
+        searchHeader.setPadding(contentGutter(), dp(19), contentGutter(), dp(16));
+        view.removeView(search);
+        searchHeader.addView(search, new LinearLayout.LayoutParams(-1, -2));
+        searchRoot.addView(searchHeader, searchRoot.indexOfChild(resultsScroll), new LinearLayout.LayoutParams(-1, -2));
+        view.setPadding(contentGutter(), 0, contentGutter(), dp(30));
         TextView feedback = text(view, "");
         feedback.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         LinearLayout results = column();
@@ -1027,8 +1066,8 @@ public final class MainActivity extends Activity {
                 query = value.toString().trim();
                 searchRequest++;
                 results.removeAllViews();
-                feedback.setText(query.isEmpty() ? "请输入片名。" : "正在搜索…");
-                feedback.setVisibility(View.VISIBLE);
+                feedback.setText(query.isEmpty() ? "请输入片名。" : "");
+                feedback.setVisibility(query.isEmpty() ? View.VISIBLE : View.GONE);
                 ui.removeCallbacks(runSearch);
                 ui.postDelayed(runSearch, 350);
             }
@@ -1043,20 +1082,26 @@ public final class MainActivity extends Activity {
         view.removeAllViews();
         feedback.setVisibility(View.VISIBLE);
         if (query.isEmpty()) { feedback.setText("请输入片名。"); return; }
-        feedback.setText("正在搜索…");
+        feedback.setVisibility(View.GONE);
+        LoadingUi.Pending pending = new LoadingUi.Pending(view, libraryUi, ui, LoadingUi.Kind.GRID, null,
+                () -> page == expected && request == searchRequest);
         String term = query;
         JellyfinApi connection = api;
         worker.execute(() -> {
             try {
                 List<JellyfinApi.Item> items = connection.search(term);
                 onPage(expected, () -> {
-                    if (request == searchRequest) showSearchResults(view, feedback, back, items, 0);
+                    if (request != searchRequest) return;
+                    pending.finish();
+                    showSearchResults(view, feedback, back, items, 0);
+                    LoadingUi.ready(view);
                 });
             } catch (Exception error) {
                 onPage(expected, () -> {
                     if (request != searchRequest) return;
-                    feedback.setText(message(error, "搜索失败"));
-                    button(view, "重试", () -> search(view, feedback, back));
+                    pending.finish();
+                    feedback.setVisibility(View.GONE);
+                    LoadingUi.failure(view, libraryUi, message(error, "搜索失败"), () -> search(view, feedback, back), false);
                 });
             }
         });
@@ -1065,7 +1110,8 @@ public final class MainActivity extends Activity {
     private void showSearchResults(LinearLayout view, TextView feedback, Runnable back,
                                    List<JellyfinApi.Item> items, int scrollY) {
         feedback.setText(items.isEmpty() ? "没有找到匹配的影片。" : "");
-        feedback.setVisibility(items.isEmpty() ? View.VISIBLE : View.GONE);
+        feedback.setVisibility(View.GONE);
+        if (items.isEmpty()) LoadingUi.empty(view, libraryUi, "没有找到匹配的影片", "试试其他片名或关键词。");
         ScrollView scroll = (ScrollView) view.getParent().getParent();
         libraryUi.grid(view, items, screenWidth(), item -> {
             int previousY = scroll.getScrollY();
@@ -1112,15 +1158,17 @@ public final class MainActivity extends Activity {
     }
 
     private void fillSeasons(LinearLayout picker, JellyfinApi.Item series, Runnable back, String selectedId) {
-        TextView loading = text(picker, "正在读取季列表…");
         int expected = page;
+        LoadingUi.Pending pending = new LoadingUi.Pending(picker, libraryUi, ui, LoadingUi.Kind.EPISODES, null, () -> page == expected);
         JellyfinApi connection = api;
         browse.execute(() -> {
             try {
                 List<JellyfinApi.Item> seasons = connection.seasons(series);
                 onPage(expected, () -> {
-                    picker.removeView(loading);
+                    boolean handoff = pending.wasShown();
+                    pending.finish();
                     LinearLayout list = column();
+                    if (handoff) list.setTag(R.id.loading_handoff, true);
                     JellyfinApi.Item selected = null;
                     for (JellyfinApi.Item season : seasons) {
                         if (selected == null || season.id.equals(selectedId)) selected = season;
@@ -1149,11 +1197,11 @@ public final class MainActivity extends Activity {
                 });
             } catch (Exception error) {
                 onPage(expected, () -> {
-                    loading.setText(message(error, "读取季列表失败"));
-                    button(picker, "重试", () -> {
+                    pending.finish();
+                    LoadingUi.failure(picker, libraryUi, message(error, "读取季列表失败"), () -> {
                         picker.removeAllViews();
                         fillSeasons(picker, series, back, selectedId);
-                    });
+                    }, false);
                 });
             }
         });
@@ -1213,16 +1261,18 @@ public final class MainActivity extends Activity {
 
     private void fillEpisodes(LinearLayout list, JellyfinApi.Item series, JellyfinApi.Item season, Runnable back) {
         list.removeAllViews();
-        TextView loading = text(list, "正在读取剧集…");
         int expected = page, request = ++seasonRequest;
+        LoadingUi.Pending pending = new LoadingUi.Pending(list, libraryUi, ui, LoadingUi.Kind.EPISODES, null,
+                () -> page == expected && request == seasonRequest);
         JellyfinApi connection = api;
         browse.execute(() -> {
             try {
                 List<JellyfinApi.Item> episodes = connection.episodes(series, season);
                 onPage(expected, () -> {
                     if (request != seasonRequest) return;
-                    list.removeView(loading);
-                    if (episodes.isEmpty()) text(list, "暂无剧集。");
+                    pending.finish();
+                    if (episodes.isEmpty()) LoadingUi.empty(list, libraryUi, "本季暂无可播放单集", "暂无可用的播放内容。");
+                    LoadingUi.ready(list);
                     for (JellyfinApi.Item episode : episodes) {
                         episodeRow(list, episode, () -> openItem(episode,
                                 () -> detailsPage(series, back, season == null ? null : season.id)));
@@ -1231,8 +1281,8 @@ public final class MainActivity extends Activity {
             } catch (Exception error) {
                 onPage(expected, () -> {
                     if (request != seasonRequest) return;
-                    loading.setText(message(error, "读取剧集失败"));
-                    button(list, "重试", () -> fillEpisodes(list, series, season, back));
+                    pending.finish();
+                    LoadingUi.failure(list, libraryUi, message(error, "读取剧集失败"), () -> fillEpisodes(list, series, season, back), false);
                 });
             }
         });
