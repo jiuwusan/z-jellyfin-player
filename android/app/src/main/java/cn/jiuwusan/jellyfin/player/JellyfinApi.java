@@ -272,13 +272,18 @@ final class JellyfinApi {
         int height = video.optInt("Height");
         boolean constrained = policy.requiresTranscode(width, height, source.optLong("Bitrate", video.optLong("BitRate")));
         int defaultSubtitle = source.optInt("DefaultSubtitleStreamIndex", -1);
-        int burnedSubtitle = PlaybackTracks.burnInIndex(mediaTracks(item.id, source, "Subtitle"), defaultSubtitle, subtitleSelection);
+        int selectedSubtitle = subtitleSelection == PlaybackTracks.AUTO ? defaultSubtitle : subtitleSelection;
+        MediaTrack selectedTrack = PlaybackTracks.subtitleTrack(mediaTracks(item.id, source, "Subtitle"), selectedSubtitle);
+        int burnedSubtitle = selectedTrack != null && selectedTrack.burnIn ? selectedSubtitle : -1;
         boolean hls = burnedSubtitle >= 0 || audioIndex != null || constrained
                 || !source.optBoolean("SupportsDirectPlay") && !source.optBoolean("SupportsDirectStream");
         JSONObject info = hls ? playbackInfo(item, sourceId, constrained || audioIndex != null || burnedSubtitle >= 0,
-                burnedSubtitle >= 0 ? burnedSubtitle : -1, audioIndex, policy) : initial;
+                selectedTrack != null && (selectedTrack.burnIn || "Embed".equals(selectedTrack.deliveryMethod)) ? selectedSubtitle : -1,
+                audioIndex, policy) : initial;
         if (hls) {
             source = findSource(info, sourceId);
+            selectedTrack = PlaybackTracks.subtitleTrack(mediaTracks(item.id, source, "Subtitle"), selectedSubtitle);
+            burnedSubtitle = selectedTrack != null && selectedTrack.burnIn ? selectedSubtitle : -1;
         }
         String session = info.getString("PlaySessionId");
         HttpUrl streamUrl;
@@ -294,8 +299,10 @@ final class JellyfinApi {
             for (String key : resolved.queryParameterNames()) {
                 if ("SubtitleStreamIndex".equalsIgnoreCase(key) || "SubtitleMethod".equalsIgnoreCase(key)) request.removeAllQueryParameters(key);
             }
-            request.setQueryParameter("SubtitleStreamIndex", Integer.toString(burnedSubtitle));
-            if (burnedSubtitle >= 0) request.setQueryParameter("SubtitleMethod", "Encode");
+            boolean serverSubtitle = selectedTrack != null && selectedTrack.available()
+                    && (selectedTrack.burnIn || "Embed".equals(selectedTrack.deliveryMethod));
+            request.setQueryParameter("SubtitleStreamIndex", Integer.toString(serverSubtitle ? selectedSubtitle : -1));
+            if (serverSubtitle) request.setQueryParameter("SubtitleMethod", selectedTrack.deliveryMethod);
             if (audioIndex != null) {
                 for (String key : resolved.queryParameterNames()) {
                     if ("AudioStreamIndex".equalsIgnoreCase(key)) request.removeAllQueryParameters(key);
@@ -356,48 +363,64 @@ final class JellyfinApi {
     private List<MediaTrack> mediaTracks(String itemId, JSONObject source, String type) {
         List<MediaTrack> result = new ArrayList<>();
         JSONArray tracks = source.optJSONArray("MediaStreams");
+        int embeddedCount = 0;
         for (int i = 0; tracks != null && i < tracks.length(); i++) {
             JSONObject track = tracks.optJSONObject(i);
-            if (track == null || !type.equals(track.optString("Type"))) continue;
+            if (track == null) continue;
+            boolean external = track.optBoolean("IsExternal");
+            int embeddedIndex = external ? -1 : embeddedCount++;
+            if (!type.equals(track.optString("Type"))) continue;
             int index = track.optInt("Index", -1);
             if (index < 0) continue;
             String language = track.optString("Language", "");
             String title = track.optString("DisplayTitle", track.optString("Title", ""));
-            String codec = track.optString("Codec", "").toLowerCase(Locale.ROOT);
+            String format = track.optString("Codec", "").toLowerCase(Locale.ROOT);
+            if ("subrip".equals(format)) format = "srt";
+            if ("webvtt".equals(format)) format = "vtt";
+            String method = "";
             HttpUrl uri = null;
-            boolean burnIn = false;
-            String format = codec;
-            boolean external = track.optBoolean("IsExternal");
             if ("Subtitle".equals(type)) {
-                if ("subrip".equals(format)) format = "srt";
-                if ("webvtt".equals(format)) format = "vtt";
-                boolean nativeText = "srt".equals(format) || "vtt".equals(format)
-                        || "ass".equals(format) || "ssa".equals(format);
-                burnIn = !nativeText && !track.optBoolean("IsTextSubtitleStream");
-                if (!burnIn) {
-                    if (!nativeText) format = "vtt";
+                String declared = track.optString("DeliveryMethod", "");
+                boolean legacy = declared.isEmpty();
+                if (legacy) {
+                    boolean text = PlaybackTracks.subtitleMime(format) != null || track.optBoolean("IsTextSubtitleStream");
+                    method = text ? "External" : "Encode";
+                    if (text && PlaybackTracks.subtitleMime(format) == null) format = "vtt";
+                } else if ("External".equalsIgnoreCase(declared)) method = "External";
+                else if ("Embed".equalsIgnoreCase(declared)) method = "Embed";
+                else if ("Encode".equalsIgnoreCase(declared)) method = "Encode";
+                else method = "Unsupported";
+                if ("External".equals(method)) {
                     String delivery = track.optString("DeliveryUrl", "");
-                    HttpUrl delivered = delivery.isEmpty() ? null : resolveServerUrl(delivery);
-                    if (delivered != null && delivered.encodedPath().endsWith("/Stream." + format)
-                            && delivered.queryParameter("startPositionTicks") == null) {
-                        HttpUrl.Builder subtitleUrl = delivered.newBuilder();
-                        for (String key : delivered.queryParameterNames()) {
-                            if ("api_key".equalsIgnoreCase(key) || "apiKey".equalsIgnoreCase(key)) {
-                                subtitleUrl.removeAllQueryParameters(key);
-                            }
+                    if (!delivery.isEmpty()) uri = resolveServerUrl(delivery);
+                    else if (legacy) uri = url("Videos").addPathSegment(itemId).addPathSegment(source.optString("Id"))
+                            .addPathSegment("Subtitles").addPathSegment(Integer.toString(index)).addPathSegment("Stream." + format).build();
+                    if (uri != null) {
+                        String path = uri.encodedPath().toLowerCase(Locale.ROOT);
+                        for (String candidate : new String[]{"srt", "vtt", "ass", "ssa", "ttml"})
+                            if (path.endsWith("." + candidate)) { format = candidate; break; }
+                        // A standalone subtitle is attached to the video's absolute timeline, not a seek-relative segment.
+                        HttpUrl.Builder request = uri.newBuilder();
+                        for (String key : uri.queryParameterNames()) {
+                            if ("api_key".equalsIgnoreCase(key) || "apiKey".equalsIgnoreCase(key)) request.removeAllQueryParameters(key);
+                            if (path.contains("/subtitles/") && path.contains("/stream.")
+                                    && ("startPositionTicks".equalsIgnoreCase(key) || "endPositionTicks".equalsIgnoreCase(key)
+                                    || "copyTimestamps".equalsIgnoreCase(key) || "addVttTimeMap".equalsIgnoreCase(key)))
+                                request.removeAllQueryParameters(key);
                         }
-                        uri = subtitleUrl.build();
-                    } else {
-                        uri = url("Videos").addPathSegment(itemId).addPathSegment(source.optString("Id"))
-                                .addPathSegment("Subtitles").addPathSegment(Integer.toString(index))
-                                .addPathSegment("Stream." + format).build();
+                        if (path.contains("/subtitles/") && path.contains("/stream.")) request
+                                .setQueryParameter("startPositionTicks", "0").setQueryParameter("endPositionTicks", "0")
+                                .setQueryParameter("copyTimestamps", "true").setQueryParameter("addVttTimeMap", "false");
+                        uri = request.build();
+                        if (path.endsWith(".m3u8")) uri = null; // Not a standalone file; do not send a playlist to a text parser.
                     }
                 }
             }
             String label = title.isEmpty() ? language : title;
             if (label.isEmpty()) label = ("Subtitle".equals(type) ? "字幕 " : "音轨 ") + index;
-            if ("Subtitle".equals(type)) label += (external ? " · 外挂" : " · 内嵌") + (burnIn ? " · 图片字幕" : "");
-            result.add(new MediaTrack(index, label, language, format, uri, burnIn));
+            if ("Subtitle".equals(type)) label += (external ? " · 外挂" : " · 内嵌") + ("Encode".equals(method) ? " · 服务端烧录" : "");
+            MediaTrack option = new MediaTrack(index, label, language, format, uri, method, embeddedIndex);
+            result.add(option);
         }
         return result;
     }
@@ -449,7 +472,10 @@ final class JellyfinApi {
         JSONObject transcode = new JSONObject().put("Type", "Video").put("Context", "Streaming")
                 .put("Protocol", "hls").put("Container", "ts").put("VideoCodec", "h264").put("AudioCodec", "aac");
         JSONArray subtitles = new JSONArray();
-        for (String format : new String[] { "srt", "subrip", "vtt", "webvtt", "ass", "ssa" }) {
+        for (String format : new String[] { "srt", "subrip", "ttml" }) {
+            subtitles.put(new JSONObject().put("Format", format).put("Method", "Embed"));
+        }
+        for (String format : new String[] { "srt", "subrip", "vtt", "webvtt", "ass", "ssa", "ttml" }) {
             subtitles.put(new JSONObject().put("Format", format).put("Method", "External"));
         }
         for (String format : new String[] { "pgssub", "pgs", "hdmv_pgs_subtitle", "dvdsub", "vobsub", "dvbsub", "xsub" }) {
@@ -554,14 +580,28 @@ final class JellyfinApi {
         final String label, language, format;
         final HttpUrl subtitleUrl;
         final boolean burnIn;
+        final String deliveryMethod;
+        final int embeddedStreamIndex;
 
         MediaTrack(int index, String label, String language, String format, HttpUrl subtitleUrl, boolean burnIn) {
+            this(index, label, language, format, subtitleUrl, burnIn ? "Encode" : "External", -1);
+        }
+
+        MediaTrack(int index, String label, String language, String format, HttpUrl subtitleUrl, String deliveryMethod, int embeddedStreamIndex) {
             this.index = index;
             this.label = label;
             this.language = language;
             this.format = format;
             this.subtitleUrl = subtitleUrl;
-            this.burnIn = burnIn;
+            this.deliveryMethod = deliveryMethod;
+            this.embeddedStreamIndex = embeddedStreamIndex;
+            this.burnIn = "Encode".equals(deliveryMethod);
+        }
+
+        boolean available() {
+            return burnIn || PlaybackTracks.subtitleMime(format) != null
+                    && ("Embed".equals(deliveryMethod) && embeddedStreamIndex >= 0
+                    || "External".equals(deliveryMethod) && subtitleUrl != null);
         }
     }
 }

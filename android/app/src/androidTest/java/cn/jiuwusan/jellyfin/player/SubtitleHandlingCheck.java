@@ -83,6 +83,9 @@ final class SubtitleHandlingCheck {
         final List<JSONObject> bodies = java.util.Collections.synchronizedList(new ArrayList<>());
         volatile boolean running = true;
         volatile boolean languageScenario;
+        volatile JSONArray subtitleOverrides;
+        volatile JSONArray negotiatedSubtitleOverrides;
+        volatile Integer defaultSubtitleOverride;
         volatile int configurationWrites;
         volatile boolean failConfigurationRead, rejectConfigurationWrite;
         volatile JSONObject configuration = new JSONObject("{\"AudioLanguagePreference\":\"eng\",\"SubtitleLanguagePreference\":\"eng\",\"SubtitleMode\":\"None\",\"RememberSubtitleSelections\":true,\"PlayDefaultAudioTrack\":true,\"OtherSetting\":42}");
@@ -114,11 +117,20 @@ final class SubtitleHandlingCheck {
         JSONObject last() { return bodies.get(bodies.size() - 1); }
         JSONObject playback(JSONObject request) throws Exception {
             int subtitle = request.optInt("SubtitleStreamIndex", languageScenario ? ("None".equals(configuration.optString("SubtitleMode")) ? -1 : 5) : 4), audio = request.optInt("AudioStreamIndex", 1);
+            if (!request.has("SubtitleStreamIndex") && defaultSubtitleOverride != null) subtitle = defaultSubtitleOverride;
             JSONArray tracks = new JSONArray().put(new JSONObject().put("Type", "Video").put("Index", 0).put("Codec", "hevc").put("Width", 1920).put("Height", 800))
                     .put(new JSONObject().put("Type", "Audio").put("Index", 1).put("Codec", "aac").put("Language", languageScenario ? "eng" : ""))
                     .put(new JSONObject().put("Type", "Audio").put("Index", 2).put("Codec", "aac").put("Language", languageScenario ? "chi" : ""))
                     .put(new JSONObject().put("Type", "Subtitle").put("Index", 4).put("Codec", "PGSSUB").put("IsTextSubtitleStream", false).put("Language", languageScenario ? "zh-Hant" : "zho").put("IsDefault", !languageScenario))
                     .put(new JSONObject().put("Type", "Subtitle").put("Index", 5).put("Codec", "subrip").put("IsTextSubtitleStream", true).put("Language", "eng").put("IsExternal", true));
+            JSONArray selectedOverrides = request.has("MediaSourceId") && negotiatedSubtitleOverrides != null
+                    ? negotiatedSubtitleOverrides : subtitleOverrides;
+            if (selectedOverrides != null) {
+                JSONArray customized = new JSONArray();
+                for (int i = 0; i < 3; i++) customized.put(tracks.get(i));
+                for (int i = 0; i < selectedOverrides.length(); i++) customized.put(selectedOverrides.get(i));
+                tracks = customized;
+            }
             JSONObject source = new JSONObject().put("Id", "source").put("Bitrate", 18_000_000).put("MediaStreams", tracks)
                     .put("SupportsDirectPlay", true).put("SupportsDirectStream", true).put("SupportsTranscoding", true)
                     .put("DefaultSubtitleStreamIndex", subtitle).put("DefaultAudioStreamIndex", audio)

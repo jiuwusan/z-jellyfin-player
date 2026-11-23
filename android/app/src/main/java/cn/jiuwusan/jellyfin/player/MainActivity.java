@@ -1618,7 +1618,7 @@ public final class MainActivity extends Activity {
             int selected = subtitle == PlaybackTracks.OFF ? 1 : 0;
             for (JellyfinApi.MediaTrack option : current.subtitles) {
                 if (localSubtitle == null && subtitle == option.index) selected = labels.size();
-                labels.add(option.label);
+                labels.add(option.label + (option.available() ? "" : " · 暂不可用"));
             }
             List<PlaybackTracks.LocalTrack> embedded = new ArrayList<>();
             if (current.subtitles.isEmpty()) {
@@ -1646,6 +1646,13 @@ public final class MainActivity extends Activity {
 
         void selectSubtitle(int requested, PlaybackTracks.LocalTrack local) {
             if (!ready()) return;
+            if (local == null && requested >= 0) {
+                JellyfinApi.MediaTrack option = PlaybackTracks.subtitleTrack(stream.subtitles, requested);
+                if (option == null || !option.available()) {
+                    Toast.makeText(MainActivity.this, "该字幕暂无法加载，请选择其他字幕。", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+            }
             int burned = local == null ? PlaybackTracks.burnInIndex(stream.subtitles, stream.defaultSubtitleIndex, requested) : -1;
             if (burned != stream.burnedSubtitleIndex) {
                 switchTo(item, null, requested, local);
