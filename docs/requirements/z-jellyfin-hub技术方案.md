@@ -198,6 +198,8 @@ schema v2 从 Android 0.6.43 / 57 支持；v1 仅保留作设备内已有加密�
 
 ## 8. 部署建议
 
+后台使用 Vue Router hash 路由：登录、首次引导、管理页签、订阅详情均可直达、刷新和历史导航。目录路径在 # 前，页面路径在 # 后；前端动态推导静态资源/API/订阅链接的物理前缀，不写死 /hub/。外部 nginx 可保留或剥离任意多级路径前缀，不需要 hash 页面的 history fallback。配置示例位于 Hub 仓库 deploy/nginx-subpath.conf.example。
+
 Compose environment 仅设置 TZ=Asia/Shanghai，不填写 HUB_PUBLIC_URL。首次网页引导通过容器命令获取的一次性码创建管理员，不预置管理员密码文件。订阅 API 生成相对路径，由浏览器当前地址生成完整链接，支持路径前缀。
 
 优先部署到可从异地直达 HTTPS 的主机。可以使用 NAS Docker，也可使用独立云主机；首版按 NAS 单实例设计。订阅响应很小，Hub 线路不承担媒体吞吐。
