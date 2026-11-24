@@ -12,6 +12,10 @@ final class ChineseTrackSelector {
     private static final Pattern TRADITIONAL = Pattern.compile("\\b(cht|hant|traditional)\\b|繁体|繁體|繁中|繁英");
     private static final Pattern SPECIAL = Pattern.compile("\\b(commentary|sdh|description|forced)\\b|评论|評論|听障|聽障|视障|視障|口述|强制|強制");
     private static final Pattern ENGLISH = Pattern.compile("\\b(eng|english)\\b|英文");
+    private static final Pattern RATE = Pattern.compile("\\b\\d+(?:\\.\\d+)?\\s*(?:kbps|mbps|bps|kb/s|mb/s|khz|hz|bits?|channels?|ch)\\b");
+    private static final Pattern CHANNELS = Pattern.compile("\\b[1-9]\\.[01](?:\\.\\d+)?\\b");
+    private static final Pattern TECHNICAL = Pattern.compile("\\b(?:dolby|digital|plus|truehd|e-?ac-?3|ac-?3|aac|dts(?:-?hd)?|master|audio|pcm|flac|mp3|opus|atmos|ddp?|ma|core|lossless|stereo|surround|pgssub|pgs|sup|srt|subrip|ass|ssa|vtt|webvtt|utf-?8)\\b");
+    private static final Pattern GENERIC = Pattern.compile("\\b(?:chinese|bilingual)\\b|中文|字幕|配音|双语|雙語");
 
     static boolean chinese(String language) {
         String normalized = LanguagePreferences.normalize(language);
@@ -30,15 +34,29 @@ final class ChineseTrackSelector {
         // An index later in this language group might be a historical manual choice.
         if (count < 2 || current != first || selected == null || special(selected)) return null;
         int currentScore = score(selected, subtitle), best = currentScore;
-        Integer result = null;
-        boolean tied = false;
+        JellyfinApi.MediaTrack result = null;
+        boolean ambiguous = false;
         for (JellyfinApi.MediaTrack track : tracks) {
             if (!chinese(track.language) || special(track) || subtitle && !track.available()) continue;
             int value = score(track, subtitle);
-            if (value > best) { best = value; result = track.index; tied = false; }
-            else if (value == best && result != null && track.index != result) tied = true;
+            if (value > best) { best = value; result = track; ambiguous = false; }
+            else if (value == best && result != null && track.index != result.index) {
+                if (!qualifier(result, subtitle).equals(qualifier(track, subtitle))) ambiguous = true;
+                if (track.index < result.index) result = track;
+            }
         }
-        return tied ? null : result;
+        return ambiguous || result == null ? null : result.index;
+    }
+
+    // Strip only known language/technical labels; keep dub variants and unknown qualifiers meaningful.
+    private static String qualifier(JellyfinApi.MediaTrack track, boolean subtitle) {
+        String title = track.title.toLowerCase(Locale.ROOT);
+        title = (subtitle ? SIMPLE : MANDARIN).matcher(title).replaceAll(" ");
+        title = RATE.matcher(title).replaceAll(" ");
+        title = CHANNELS.matcher(title).replaceAll(" ");
+        title = TECHNICAL.matcher(title).replaceAll(" ");
+        title = GENERIC.matcher(title).replaceAll(" ");
+        return title.replace("原盤", "原盘").replace("國配", "国配").replaceAll("[^\\p{L}\\p{N}]+", "");
     }
 
     private static boolean special(JellyfinApi.MediaTrack track) {

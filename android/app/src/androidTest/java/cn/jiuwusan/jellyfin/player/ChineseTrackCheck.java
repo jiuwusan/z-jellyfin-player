@@ -55,7 +55,17 @@ final class ChineseTrackCheck {
             check(Integer.valueOf(5).equals(select(true, 4, traditional, track(5, "zho", "简英双语"))), "Bilingual fallback missing");
             check(select(true, 4, traditional, track(5, "zho", "Eng/SUP")) == null, "Mistagged English selected as Chinese");
             check(select(true, 4, traditional) == null, "Single candidate changed");
-            check(select(false, 1, cantonese, track(3, "zho", "Mandarin"), track(7, "zho", "Mandarin")) == null, "Ambiguous equivalent candidates were guessed");
+            check(Integer.valueOf(3).equals(select(false, 1, cantonese, track(3, "zho", "Mandarin"), track(7, "zho", "Mandarin"))), "Equivalent Mandarin tracks should use first index");
+            check(Integer.valueOf(3).equals(select(false, 1, cantonese,
+                    track(7, "zho", "Mandarin Dolby Digital Audio 5.1 @ 640 kbps"),
+                    track(3, "zho", "Mandarin Dolby TrueHD Audio 5.1 @ 2480 kbps"))), "Mandarin codec variants did not use stable index order");
+            check(Integer.valueOf(5).equals(select(true, 4, traditional,
+                    track(8, "zh-Hans", "Chs/SRT 原盘简体"), track(5, "zho", "Chs/SUP 原盘简体"))), "Equivalent Simplified subtitle formats did not use stable index order");
+            check(Integer.valueOf(5).equals(select(true, 4, traditional,
+                    track(8, "zh-Hans", "简体中文"), track(5, "zho", "Chs"))), "Chinese script aliases were treated as different purposes");
+            check(select(false, 1, cantonese, track(3, "zho", "Mandarin 国配"), track(7, "zho", "Mandarin 台配")) == null, "Different dub variants were guessed");
+            check(select(true, 4, traditional, track(5, "zho", "Chs/SUP 原盘简体"), track(8, "zh-Hans", "Chs/SRT 国配简体")) == null, "Different subtitle purposes were guessed");
+            check(select(false, 1, track(1, "zho", "Mandarin TrueHD"), track(3, "zho", "Mandarin AC3")) == null, "Already suitable server audio was replaced");
             integration();
             out.putString("result", "ALL_PASS: first-group gate/later defaults/manual protection/account isolation/Chinese aliases/conflicts/roles/negotiation");
             test.finish(Activity.RESULT_OK, out);
@@ -87,9 +97,11 @@ final class ChineseTrackCheck {
                     .put("RememberAudioSelections", true).put("RememberSubtitleSelections", true);
             fixture.audioOverrides = new org.json.JSONArray().put(jsonTrack("Audio", 1, "zho", "Cantonese"))
                     .put(jsonTrack("Audio", 2, "zho", "Cantonese AC3"))
-                    .put(jsonTrack("Audio", 3, "zho", "Mandarin"));
+                    .put(jsonTrack("Audio", 3, "zho", "Mandarin Dolby TrueHD Audio 5.1 @ 2480 kbps"))
+                    .put(jsonTrack("Audio", 7, "zho", "Mandarin Dolby Digital Audio 5.1 @ 640 kbps"));
             fixture.subtitleOverrides = new org.json.JSONArray().put(jsonTrack("Subtitle", 4, "zho", "Cht"))
-                    .put(jsonTrack("Subtitle", 5, "zho", "Chs"));
+                    .put(jsonTrack("Subtitle", 5, "zho", "Chs/SUP 原盘简体"))
+                    .put(jsonTrack("Subtitle", 8, "zh-Hans", "Chs/SRT 原盘简体").put("Codec", "subrip").put("IsTextSubtitleStream", true));
             ManualTrackChoices choices = new ManualTrackChoices(preferences);
             JellyfinApi api = api(fixture, choices);
             JellyfinApi.Item item = new JellyfinApi.Item(new org.json.JSONObject().put("Id", "film").put("Name", "Fixture").put("Type", "Movie"));
