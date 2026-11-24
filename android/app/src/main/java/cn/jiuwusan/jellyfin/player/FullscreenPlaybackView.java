@@ -42,10 +42,11 @@ final class FullscreenPlaybackView extends FrameLayout {
     private final View touchSurface;
     private final LinearLayout header, bottom, trackPanel, trackList;
     private final ScrollView trackScroll;
+    private final TrackBubbleDrawable trackBubble;
     private final FrameLayout transportRow;
     private final LinearLayout counters;
     private final TextView title, subtitle, message, time, quality, play, rewind, forward;
-    private final TextView previous, next, subtitles, audio, trackTitle;
+    private final TextView previous, next, subtitles, audio;
     private final DefaultTimeBar timeline;
     private final FrameLayout preparationCover;
     private final LinearLayout preparationCenter, preparationError;
@@ -243,26 +244,18 @@ final class FullscreenPlaybackView extends FrameLayout {
 
         trackPanel = style.column();
         trackPanel.setId(R.id.playback_track_panel);
-        trackPanel.setBackground(outline(0xf5111a20, 0x96657785, LibraryUi.RADIUS_PANEL));
-        trackPanel.setPadding(dp(10), dp(5), dp(10), dp(10));
+        trackBubble = new TrackBubbleDrawable(getResources().getDisplayMetrics().density);
+        trackPanel.setBackground(trackBubble);
+        trackPanel.setPadding(dp(10), dp(20), dp(10), dp(10));
         trackPanel.setClickable(true);
         trackPanel.setVisibility(GONE);
         if (Build.VERSION.SDK_INT >= 28) trackPanel.setAccessibilityPaneTitle("播放轨道");
         addView(trackPanel, new LayoutParams(dp(360), -2, Gravity.TOP | Gravity.END));
-        LinearLayout trackHeader = new LinearLayout(context);
-        trackHeader.setGravity(Gravity.CENTER_VERTICAL);
-        trackTitle = singleLine("", 24, LibraryUi.TEXT, true);
-        trackTitle.setPadding(dp(10), 0, 0, 0);
-        trackHeader.addView(trackTitle, new LinearLayout.LayoutParams(0, -2, 1));
-        TextView closeChoices = control("×", "关闭菜单", this::dismissChoices);
-        closeChoices.setTextSize(24);
-        closeChoices.setBackgroundColor(Color.TRANSPARENT);
-        trackHeader.addView(closeChoices, new LinearLayout.LayoutParams(dp(56), dp(56)));
-        trackPanel.addView(trackHeader);
         trackScroll = new ScrollView(context);
         trackList = style.column();
         trackScroll.addView(trackList, new ScrollView.LayoutParams(-1, -2));
         trackPanel.addView(trackScroll, new LinearLayout.LayoutParams(-1, -2));
+        trackPanel.addOnLayoutChangeListener((view, l, t, r, b, ol, ot, or, ob) -> updateTrackAnchor());
 
         setOnApplyWindowInsetsListener((view, insets) -> {
             DisplayCutout cutout = Build.VERSION.SDK_INT >= 28 ? insets.getDisplayCutout() : null;
@@ -743,19 +736,19 @@ final class FullscreenPlaybackView extends FrameLayout {
         dismissChoices();
         activeTrackButton = trigger;
         activeTrackButton.setBackground(outline(SELECTED_BACKGROUND, 0x8059c7ed, LibraryUi.RADIUS_CONTROL));
-        trackTitle.setText(name);
+        if (Build.VERSION.SDK_INT >= 28) trackPanel.setAccessibilityPaneTitle(name);
         trackList.removeAllViews();
         View focus = null;
         for (int i = 0; i < choices.length; i++) {
             String value = choices[i];
-            String[] lines = "字幕".equals(name) && i == 0
-                    ? new String[] { value, "使用 Jellyfin 的字幕偏好" } : value.split(" (?:-|·) ", 2);
+            String[] lines = value.split(" (?:-|·) ", 2);
             LinearLayout option = addTrackChoice(lines, i == selected, i, selection);
             if (i == selected || focus == null) focus = option;
         }
         trackPanel.setVisibility(VISIBLE);
         restartControlsTimeout();
         fitTrackList();
+        trackPanel.post(this::updateTrackAnchor);
         trackScroll.scrollTo(0, 0);
         if (focus != null) {
             View choice = focus;
@@ -796,14 +789,38 @@ final class FullscreenPlaybackView extends FrameLayout {
 
     private void fitTrackList() {
         if (trackPanel.getVisibility() != VISIBLE) return;
-        int available = getHeight() - topInset - bottom.getHeight() - dp(129);
+        LayoutParams panelBounds = (LayoutParams) trackPanel.getLayoutParams();
+        if (activeTrackButton != null && activeTrackButton.getHeight() > 0) {
+            int[] root = new int[2], trigger = new int[2];
+            getLocationInWindow(root);
+            activeTrackButton.getLocationInWindow(trigger);
+            int top = trigger[1] - root[1] + activeTrackButton.getHeight() + dp(4);
+            if (panelBounds.topMargin != top) {
+                panelBounds.topMargin = top;
+                trackPanel.setLayoutParams(panelBounds);
+            }
+        }
+        int available = getHeight() - panelBounds.topMargin - bottom.getHeight() - dp(8)
+                - trackPanel.getPaddingTop() - trackPanel.getPaddingBottom();
         LinearLayout.LayoutParams bounds = (LinearLayout.LayoutParams) trackScroll.getLayoutParams();
-        int height = Math.min(dp(CHOICE_HEIGHT * trackList.getChildCount()),
-                Math.max(dp(CHOICE_HEIGHT), available));
+        int count = trackList.getChildCount();
+        int minimum = dp(CHOICE_HEIGHT * Math.min(2, count));
+        int screenAvailable = Math.max(0, getHeight() - panelBounds.topMargin - bottomInset - dp(8)
+                - trackPanel.getPaddingTop() - trackPanel.getPaddingBottom());
+        // A floating menu may cover the transport controls to keep two complete choices visible.
+        int height = Math.min(dp(CHOICE_HEIGHT * count), Math.min(screenAvailable, Math.max(minimum, available)));
         if (bounds.height != height) {
             bounds.height = height;
             trackScroll.setLayoutParams(bounds);
         }
+    }
+
+    private void updateTrackAnchor() {
+        if (activeTrackButton == null || trackPanel.getVisibility() != VISIBLE) return;
+        int[] panel = new int[2], trigger = new int[2];
+        trackPanel.getLocationInWindow(panel);
+        activeTrackButton.getLocationInWindow(trigger);
+        trackBubble.setAnchor(trigger[0] + activeTrackButton.getWidth() / 2f - panel[0]);
     }
 
     boolean dismissChoices() {

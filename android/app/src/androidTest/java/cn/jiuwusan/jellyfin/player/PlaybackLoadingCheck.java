@@ -49,6 +49,24 @@ final class PlaybackLoadingCheck {
         call("beginPreparation", new Class<?>[]{View.class, long.class, long.class, Runnable.class},
                 new View(activity), 1_961_000L, 2_780_000L, (Runnable) () -> { retries.incrementAndGet(); begin(); });
     }
+
+    private void checkChoiceRows(int count) {
+        try {
+            java.lang.reflect.Field field = FullscreenPlaybackView.class.getDeclaredField("trackList");
+            field.setAccessible(true);
+            ViewGroup list = (ViewGroup) field.get(screen);
+            for (int i = 0; i < count; i++) {
+                View row = list.getChildAt(i);
+                android.graphics.Rect visible = new android.graphics.Rect();
+                check(row != null && row.getHeight() > 0 && row.getGlobalVisibleRect(visible)
+                        && visible.height() == row.getHeight(), "Bubble clipped complete choice row " + i);
+            }
+            if (list.getChildCount() == 1) {
+                View scroll = (View) list.getParent();
+                check(scroll.getHeight() == list.getChildAt(0).getHeight(), "Single choice left empty rows");
+            }
+        } catch (ReflectiveOperationException error) { throw new AssertionError(error); }
+    }
     private void capture(String name) throws Exception {
         android.graphics.Bitmap image = test.getUiAutomation().takeScreenshot();
         if (image == null) return;
@@ -124,6 +142,18 @@ final class PlaybackLoadingCheck {
                 check(!named("playback_preparation_cover").isShown(), "Cover not dismissed after first frame");
                 check(!named("playback_preparation_spinner").isShown(), "Spinner not dismissed after first frame");
                 check(named("playback_toggle").isEnabled(), "First frame did not unlock transport");
+                screen.showChoices("音轨", new String[]{"单条音轨"}, 0, index -> {});
+            });
+            SystemClock.sleep(120);
+            ui(() -> {
+                checkChoiceRows(1);
+                screen.dismissChoices();
+                screen.showChoices("字幕", new String[]{"简体中文", "繁体中文", "关闭字幕"}, 0, index -> {});
+            });
+            SystemClock.sleep(120);
+            ui(() -> {
+                checkChoiceRows(2);
+                screen.dismissChoices();
                 begin();
                 activity.setContentView(new View(activity));
             });
@@ -132,7 +162,7 @@ final class PlaybackLoadingCheck {
                 check(!text(screen, "视频准备较慢"), "Detached screen received stale timer");
                 player.release();
             });
-            result.putString("result", "ALL_PASS: delayed spinner / slow / retry / first-frame gate / resume / detach");
+            result.putString("result", "ALL_PASS: delayed spinner / slow / retry / first-frame gate / resume / bubble one-row fit and two complete rows / detach");
             test.finish(Activity.RESULT_OK, result);
         } catch (Throwable e) {
             result.putString("failure", android.util.Log.getStackTraceString(e));

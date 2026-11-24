@@ -621,6 +621,7 @@ public final class MainActivity extends Activity {
         worker.execute(() -> {
             try {
                 JellyfinApi connected = new JellyfinApi(candidate, device);
+                connected.useManualChoices(new ManualTrackChoices(getSharedPreferences("manual-track-choices", MODE_PRIVATE)));
                 connected.login();
                 afterSplash(expected, splashReadyAt, () -> {
                     settings = candidate;
@@ -1940,32 +1941,37 @@ public final class MainActivity extends Activity {
             if (!ready()) return;
             JellyfinApi.Stream current = stream;
             List<String> labels = new ArrayList<>();
-            labels.add("自动");
-            labels.add("关闭");
-            int selected = subtitle == PlaybackTracks.OFF ? 1 : 0;
+            // AUTO remains an internal policy; the menu shows the resolved track rather than the policy.
+            int actual = subtitle == PlaybackTracks.OFF ? PlaybackTracks.OFF
+                    : current.burnedSubtitleIndex >= 0 ? current.burnedSubtitleIndex
+                    : subtitle == PlaybackTracks.AUTO ? current.defaultSubtitleIndex : subtitle;
+            int selected = -1;
             for (JellyfinApi.MediaTrack option : current.subtitles) {
-                if (localSubtitle == null && subtitle == option.index) selected = labels.size();
+                if (localSubtitle == null && actual == option.index) selected = labels.size();
                 labels.add(option.label + (failedSubtitles.contains(option.index) ? " · 点击重试" : option.available() ? "" : " · 暂不可用"));
             }
             List<PlaybackTracks.LocalTrack> embedded = new ArrayList<>();
             if (current.subtitles.isEmpty()) {
                 embedded = PlaybackTracks.supported(player.getCurrentTracks(), C.TRACK_TYPE_TEXT);
                 for (PlaybackTracks.LocalTrack option : embedded) {
-                    if (localSubtitle != null && localSubtitle.override().equals(option.override())) selected = labels.size();
+                    if (subtitle != PlaybackTracks.OFF && (localSubtitle != null
+                            ? localSubtitle.override().equals(option.override()) : option.selected())) selected = labels.size();
                     labels.add(option.label);
                 }
             }
+            int offChoice = labels.size();
+            if (selected < 0 && localSubtitle == null && actual < 0) selected = offChoice;
+            labels.add("关闭字幕");
             List<PlaybackTracks.LocalTrack> localOptions = embedded;
             screen.showChoices("字幕", labels.toArray(new String[0]), selected, which -> {
                 if (!ready() || stream != current) return;
                 int requested;
                 PlaybackTracks.LocalTrack local = null;
-                if (which == 0) requested = PlaybackTracks.AUTO;
-                else if (which == 1) requested = PlaybackTracks.OFF;
-                else if (which - 2 < current.subtitles.size()) requested = current.subtitles.get(which - 2).index;
+                if (which == offChoice) requested = PlaybackTracks.OFF;
+                else if (which < current.subtitles.size()) requested = current.subtitles.get(which).index;
                 else {
                     requested = PlaybackTracks.AUTO;
-                    local = localOptions.get(which - 2 - current.subtitles.size());
+                    local = localOptions.get(which - current.subtitles.size());
                 }
                 selectSubtitle(requested, local);
             });
@@ -2014,8 +2020,13 @@ public final class MainActivity extends Activity {
         void rememberSubtitleChoice(int requested, PlaybackTracks.LocalTrack local) {
             PlaybackTrackPreference choice = local == null && requested >= 0
                     ? PlaybackTrackPreference.of(PlaybackTracks.subtitleTrack(stream.subtitles, requested)) : null;
-            if (change != null) { change.updateSubtitlePreference = true; change.subtitlePreference = choice; }
-            else preferredSubtitle = choice;
+            if (change != null) {
+                change.updateSubtitlePreference = true; change.subtitlePreference = choice;
+                change.manualSubtitle = local != null || requested != PlaybackTracks.AUTO;
+            } else {
+                preferredSubtitle = choice;
+                connection.rememberTrack(stream, true, local != null || requested != PlaybackTracks.AUTO);
+            }
         }
 
         void updateReportedSubtitle(JellyfinApi.Stream value) {
@@ -2093,7 +2104,10 @@ public final class MainActivity extends Activity {
                     if (index != current.audioIndex) {
                         switchTo(item, index);
                         if (change != null) change.audioPreference = choice;
-                    } else preferredAudio = choice;
+                    } else {
+                        preferredAudio = choice;
+                        connection.rememberTrack(current, false, true);
+                    }
                 });
                 return;
             }
@@ -2108,6 +2122,7 @@ public final class MainActivity extends Activity {
                 if (ready() && stream == current) {
                     PlaybackTracks.select(player, options.get(which));
                     current.reportAudioIndex = null; preferredAudio = null;
+                    connection.rememberTrack(current, false, true);
                     report("Progress");
                 }
             });
@@ -2230,6 +2245,8 @@ public final class MainActivity extends Activity {
             change = null;
             if (pending.audioPreference != null) preferredAudio = pending.audioPreference;
             if (pending.updateSubtitlePreference) preferredSubtitle = pending.subtitlePreference;
+            if (pending.audioPreference != null) connection.rememberTrack(stream, false, true);
+            if (pending.updateSubtitlePreference) connection.rememberTrack(stream, true, pending.manualSubtitle);
             if (stream != pending.previous) enqueueReport(connection, pending.previous, "Stopped", pending.position, !pending.playWhenReady);
             if (pending.target != item) {
                 if (item.seriesId.isEmpty() || !item.seriesId.equals(pending.target.seriesId)) {
@@ -2263,6 +2280,7 @@ public final class MainActivity extends Activity {
         String previousQuality;
         PlaybackTrackPreference audioPreference, subtitlePreference;
         boolean updateSubtitlePreference;
+        boolean manualSubtitle;
 
         PlaybackChange(JellyfinApi.Stream previous, JellyfinApi.Item target, long position, boolean playWhenReady,
                        boolean endedBeforeSwitch, int subtitle, PlaybackTracks.LocalTrack localSubtitle,

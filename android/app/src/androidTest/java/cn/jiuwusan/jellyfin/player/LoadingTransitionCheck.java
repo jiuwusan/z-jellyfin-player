@@ -58,6 +58,7 @@ public final class LoadingTransitionCheck extends Instrumentation {
     }
     @Override public void onStart() {
         if ("track-memory".equals(collectionSuite)) { new TrackMemoryCheck(this).run(); return; }
+        if ("chinese-tracks".equals(collectionSuite)) { new ChineseTrackCheck(this).run(); return; }
         if ("subscription-recovery".equals(collectionSuite)) { new SubscriptionLifecycleCheck(this).runConnectionRecovery(); return; }
         if ("subscription-controller".equals(collectionSuite)) { new SubscriptionControllerCheck(this).run(); return; }
         if ("subscription-lifecycle".equals(collectionSuite)) { new SubscriptionLifecycleCheck(this).run(); return; }

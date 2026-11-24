@@ -30,6 +30,9 @@ final class JellyfinApi {
     private final String device;
     private String token;
     private String userId;
+    private String serverIdentity;
+    private volatile JSONObject accountConfiguration;
+    private ManualTrackChoices manualChoices;
     final SubtitleCache subtitleCache = new SubtitleCache();
 
     JellyfinApi(ConnectionSettings settings, String device) {
@@ -59,14 +62,46 @@ final class JellyfinApi {
                 new JSONObject().put("Username", settings.user).put("Pw", settings.password));
         token = login.getString("AccessToken");
         userId = login.getJSONObject("User").getString("Id");
+        serverIdentity = login.optString("ServerId", "");
+        if (serverIdentity.isEmpty()) serverIdentity = settings.server.toString();
+        accountConfiguration = login.getJSONObject("User").optJSONObject("Configuration");
         subtitleCache.clear();
         Log.i(TAG, "Login successful");
+    }
+
+    void useManualChoices(ManualTrackChoices choices) { manualChoices = choices; }
+
+    void rememberTrack(Stream stream, boolean subtitle, boolean manual) {
+        if (manualChoices == null || userId == null) return;
+        JSONObject configuration = accountConfiguration;
+        boolean remember = configuration != null && configuration.optBoolean(subtitle
+                ? "RememberSubtitleSelections" : "RememberAudioSelections", false);
+        manualChoices.set(serverIdentity, userId, stream.itemId, stream.sourceId, subtitle, manual && remember);
+    }
+
+    private boolean protectedTrack(String item, String source, boolean subtitle) {
+        JSONObject configuration = accountConfiguration;
+        return configuration != null && configuration.optBoolean(subtitle
+                ? "RememberSubtitleSelections" : "RememberAudioSelections", false)
+                && manualChoices != null && manualChoices.contains(serverIdentity, userId, item, source, subtitle);
+    }
+
+    private boolean chinesePreference(boolean subtitle) {
+        JSONObject configuration = accountConfiguration;
+        if (configuration == null) return false;
+        String preference = configuration.optString(subtitle ? "SubtitleLanguagePreference" : "AudioLanguagePreference")
+                .trim().toLowerCase(Locale.ROOT).replace('_', '-');
+        if (!"zho".equals(preference) && !"chi".equals(preference) && !"zh".equals(preference)) return false;
+        // Smart/forced-only modes depend on the audio and server policy; do not second-guess them.
+        String mode = configuration.optString("SubtitleMode", "");
+        return !subtitle || "Default".equalsIgnoreCase(mode) || "Always".equalsIgnoreCase(mode);
     }
 
     private JSONObject userConfiguration() throws Exception {
         JSONObject user = json("读取账号偏好", url("Users/" + userId).build(), null);
         JSONObject configuration = user.optJSONObject("Configuration");
         if (configuration == null) throw new IOException("无法读取账号语言偏好");
+        accountConfiguration = new JSONObject(configuration.toString());
         return configuration;
     }
 
@@ -83,6 +118,7 @@ final class JellyfinApi {
                 && subtitles.equals(configuration.optString("SubtitleLanguagePreference", ""))) return;
         configuration.put("AudioLanguagePreference", audio).put("SubtitleLanguagePreference", subtitles);
         json("保存账号语言偏好", url("Users/Configuration").addQueryParameter("userId", userId).build(), configuration);
+        accountConfiguration = configuration;
     }
 
     List<Item> search(String query) throws Exception {
@@ -315,11 +351,26 @@ final class JellyfinApi {
             Integer matched = subtitlePreference.match(mediaTracks(item.id, source, "Subtitle"), true);
             if (matched != null) subtitleSelection = matched;
         }
+        if (audioIndex == null && audioPreference == null && chinesePreference(false)
+                && !protectedTrack(item.id, sourceId, false)) {
+            audioIndex = ChineseTrackSelector.select(mediaTracks(item.id, source, "Audio"),
+                    source.optInt("DefaultAudioStreamIndex", -1), false);
+            if (audioIndex != null) Log.i(TAG, "Chinese audio refinement from="
+                    + source.optInt("DefaultAudioStreamIndex", -1) + " to=" + audioIndex);
+        }
         JSONObject video = firstVideo(source);
         int width = video.optInt("Width");
         int height = video.optInt("Height");
         boolean constrained = policy.requiresTranscode(width, height, source.optLong("Bitrate", video.optLong("BitRate")));
         int defaultSubtitle = source.optInt("DefaultSubtitleStreamIndex", -1);
+        if (!forceBurn && subtitleSelection == PlaybackTracks.AUTO && subtitlePreference == null
+                && chinesePreference(true) && !protectedTrack(item.id, sourceId, true)) {
+            Integer refined = ChineseTrackSelector.select(mediaTracks(item.id, source, "Subtitle"), defaultSubtitle, true);
+            if (refined != null) {
+                Log.i(TAG, "Chinese subtitle refinement from=" + defaultSubtitle + " to=" + refined);
+                defaultSubtitle = refined;
+            }
+        }
         int selectedSubtitle = forceBurn ? forceSubtitleIndex : subtitleSelection == PlaybackTracks.AUTO ? defaultSubtitle : subtitleSelection;
         MediaTrack selectedTrack = PlaybackTracks.subtitleTrack(mediaTracks(item.id, source, "Subtitle"), selectedSubtitle);
         if (forceBurn && selectedTrack == null) throw new IOException("所选字幕已不可用");
