@@ -2,6 +2,9 @@ package cn.jiuwusan.jellyfin.player;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.ClipData;
+import android.content.ClipDescription;
+import android.content.ClipboardManager;
 import android.content.pm.ActivityInfo;
 import android.content.res.ColorStateList;
 import android.graphics.Color;
@@ -14,6 +17,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.PersistableBundle;
 import android.os.SystemClock;
 import android.text.Editable;
 import android.text.InputType;
@@ -312,8 +316,47 @@ public final class MainActivity extends Activity {
 
     private void settingsPage(String message) {
         Runnable back = api == null ? null : browseTab == BrowseTab.LIBRARY ? this::librariesPage : this::homePage;
-        LinearLayout view = api == null ? panel("订阅设置", true, null)
-                : panel("订阅设置", true, back, BrowseTab.SETTINGS);
+        LinearLayout content = api == null ? panel("订阅设置", true, null)
+                : panel("设置", true, back, BrowseTab.SETTINGS);
+        ScrollView scroll = (ScrollView) content.getParent();
+        LinearLayout tabs = new LinearLayout(this);
+        if (api == null) content.addView(tabs);
+        else {
+            LinearLayout root = (LinearLayout) scroll.getParent();
+            tabs.setPadding(contentGutter(), 0, contentGutter(), 0);
+            root.addView(tabs, root.indexOfChild(scroll), new LinearLayout.LayoutParams(-1, -2));
+            content.setPadding(contentGutter(), dp(6), contentGutter(), dp(30));
+        }
+        TextView subscriptionTab = addLibraryTab(tabs, "订阅", true);
+        TextView playbackTab = addLibraryTab(tabs, "播放", false);
+        subscriptionTab.setContentDescription("订阅设置分类");
+        playbackTab.setContentDescription("播放设置分类");
+        Drawable selectedMarker = subscriptionTab.getBackground();
+        LinearLayout view = column(), playbackSettings = column();
+        content.addView(view); content.addView(playbackSettings);
+        playbackSettings.setVisibility(View.GONE);
+        View.OnClickListener selectTab = selected -> {
+            boolean playbackSelected = selected == playbackTab;
+            if (playbackTab.isSelected() == playbackSelected) return;
+            View focus = getCurrentFocus();
+            if (focus != null) { hideKeyboard(focus); focus.clearFocus(); }
+            subscriptionTab.setSelected(!playbackSelected); playbackTab.setSelected(playbackSelected);
+            subscriptionTab.setTextColor(playbackSelected ? LibraryUi.MUTED : LibraryUi.ACCENT_LIGHT);
+            playbackTab.setTextColor(playbackSelected ? LibraryUi.ACCENT_LIGHT : LibraryUi.MUTED);
+            subscriptionTab.setTypeface(null, playbackSelected ? Typeface.NORMAL : Typeface.BOLD);
+            playbackTab.setTypeface(null, playbackSelected ? Typeface.BOLD : Typeface.NORMAL);
+            subscriptionTab.setBackground(playbackSelected ? null : selectedMarker);
+            playbackTab.setBackground(playbackSelected ? selectedMarker : null);
+            view.setVisibility(playbackSelected ? View.GONE : View.VISIBLE);
+            playbackSettings.setVisibility(playbackSelected ? View.VISIBLE : View.GONE);
+            if (playbackSelected && playbackSettings.getChildCount() == 0) {
+                if (api != null) subscriptionLanguages(playbackSettings);
+                else text(playbackSettings, "连接订阅后可设置音频和字幕语言偏好。");
+            }
+            scroll.scrollTo(0, 0);
+        };
+        libraryUi.actionable(subscriptionTab, () -> selectTab.onClick(subscriptionTab));
+        libraryUi.actionable(playbackTab, () -> selectTab.onClick(playbackTab));
         section(view, "家庭影音订阅");
         SubscriptionSettings active = subscriptionController == null ? null : subscriptionController.state();
         String displayedLink = active == null ? "" : SubscriptionClient.Link.parse(active.link).url + "#********";
@@ -348,6 +391,25 @@ public final class MainActivity extends Activity {
             });
         });
         if (active != null) {
+            actionButton(view, "复制订阅链接", false, () -> {
+                SubscriptionSettings current = subscriptionController == null ? null : subscriptionController.state();
+                ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+                if (current == null || clipboard == null) {
+                    Toast.makeText(this, "暂无可复制的订阅链接", Toast.LENGTH_SHORT).show(); return;
+                }
+                try {
+                    ClipData clip = ClipData.newPlainText("订阅链接", current.link);
+                    if (Build.VERSION.SDK_INT >= 33) {
+                        PersistableBundle extras = new PersistableBundle();
+                        extras.putBoolean(ClipDescription.EXTRA_IS_SENSITIVE, true);
+                        clip.getDescription().setExtras(extras);
+                    }
+                    clipboard.setPrimaryClip(clip);
+                    Toast.makeText(this, "订阅链接已复制", Toast.LENGTH_SHORT).show();
+                } catch (Exception ignored) {
+                    Toast.makeText(this, "复制失败，请重试", Toast.LENGTH_SHORT).show();
+                }
+            });
             actionButton(view, "立即同步", false, () -> subscriptionController.sync(true));
             actionButton(view, "清除订阅", false, () -> confirmSubscription(() -> {
                 try {
@@ -363,12 +425,11 @@ public final class MainActivity extends Activity {
                 } catch (Exception error) { subscriptionStatus.setText("清除失败，请重试"); }
             }));
         }
-        if (api != null) subscriptionLanguages(view);
         text(view, "更换或清除订阅需要确认密码；普通同步不会修改音轨或字幕偏好。");
     }
 
     private void subscriptionLanguages(LinearLayout view) {
-        settingsSection(view, "播放语言");
+        section(view, "播放语言");
         JellyfinApi connection = api;
         int expected = page;
         Spinner audio = qualityField(view, "首选的音频语言", LanguagePreferences.LABELS,

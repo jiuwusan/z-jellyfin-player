@@ -113,6 +113,9 @@ final class LanguagePreferencesCheck {
             test.runOnMainSync(() -> { try {
                 java.lang.reflect.Method page = MainActivity.class.getDeclaredMethod("settingsPage", String.class); page.setAccessible(true); page.invoke(activity, "");
                 View root = activity.getWindow().getDecorView();
+                View playbackTab = find(root, "播放设置分类");
+                check(playbackTab != null, "Playback settings tab missing");
+                playbackTab.performClick();
                 Spinner audio = (Spinner) find(root, "首选的音频语言"), subtitles = (Spinner) find(root, "字幕语言偏好");
                 check(audio != null && subtitles != null, "Language controls missing");
             } catch (Throwable e) { failure.set(e); } });
