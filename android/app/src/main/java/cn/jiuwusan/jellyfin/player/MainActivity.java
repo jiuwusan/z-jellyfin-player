@@ -93,6 +93,7 @@ public final class MainActivity extends Activity {
     private int searchRequest;
     private SubscriptionController subscriptionController;
     private SubscriptionController.Prepared pendingSubscription;
+    private Runnable connectionRecovery;
     private TextView subscriptionStatus, managedQuality;
     private boolean closing;
     private String subscriptionMessage = "";
@@ -166,6 +167,7 @@ public final class MainActivity extends Activity {
                     if (subscriptionStatus != null && subscriptionStatus.isAttachedToWindow()) subscriptionStatus.setText(message);
                 }
                 @Override public void prepared(SubscriptionController.Prepared prepared) { applySubscription(prepared); }
+                @Override public void settled() { finishConnectionRecovery(); }
                 @Override public void blocked() {
                     pendingSubscription = null;
                     if (playback == null) showBlockedSubscription();
@@ -178,7 +180,7 @@ public final class MainActivity extends Activity {
                 afterSplash(launchPage, splashReadyAt, () -> settingsPage(""));
             } else {
                 ui.postDelayed(() -> onPage(launchPage, () -> splash.showConnectionStatus(() -> settingsPage(""))), 1600);
-                connect(settings, splashReadyAt);
+                connect(settings, splashReadyAt, true);
             }
         } catch (Exception error) {
             afterSplash(launchPage, splashReadyAt, () -> settingsPage("无法读取已保存的配置，请重新填写。"));
@@ -314,9 +316,11 @@ public final class MainActivity extends Activity {
                 : panel("订阅设置", true, back, BrowseTab.SETTINGS);
         section(view, "家庭影音订阅");
         SubscriptionSettings active = subscriptionController == null ? null : subscriptionController.state();
-        EditText link = settingsField(view, "订阅链接", "", false);
+        String displayedLink = active == null ? "" : SubscriptionClient.Link.parse(active.link).url + "#********";
+        EditText link = settingsField(view, "订阅链接", displayedLink, false);
         link.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
-        link.setHint(active == null ? "粘贴 HTTPS 订阅链接" : "已配置；填写新链接以更换");
+        link.setSelectAllOnFocus(true);
+        link.setHint("粘贴完整 HTTPS 订阅链接");
         subscriptionStatus = text(view, message.isEmpty() ? subscriptionMessage.isEmpty()
                 ? active == null ? "首次填写链接后，自动获取代理、授权和画质。" : "已配置订阅 v" + active.configuration.revision
                 : subscriptionMessage : message);
@@ -325,12 +329,16 @@ public final class MainActivity extends Activity {
             text(view, "配置来源：" + SubscriptionClient.Link.parse(active.link).url.host());
             text(view, "上次同步：" + android.text.format.DateFormat.format("yyyy-MM-dd HH:mm", active.checkedAt));
             ConnectionSettings managed = active.configuration.settings(settings);
+            text(view, "代理地址：" + managed.host + ":" + managed.port);
+            text(view, "Jellyfin 服务地址：" + managed.server);
+            text(view, "Jellyfin 账号：" + managed.user);
             managedQuality = text(view, "画质由服务端管理："
                     + PlaybackPolicy.RESOLUTION_LABELS[PlaybackPolicy.optionIndex(PlaybackPolicy.WIDTHS, managed.resolution, 1920)]
                     + " / " + PlaybackPolicy.RATE_LABELS[PlaybackPolicy.optionIndex(PlaybackPolicy.RATES, managed.bitrate, 4_000_000)]);
         }
         actionButton(view, "保存并连接", true, () -> {
-            String proposed = value(link);
+            String entered = value(link);
+            String proposed = active != null && entered.equals(displayedLink) ? active.link : entered;
             try { SubscriptionClient.Link.parse(proposed); }
             catch (Exception error) { subscriptionStatus.setText("请填写完整有效的 HTTPS 订阅链接"); return; }
             confirmSubscription(() -> {
@@ -384,15 +392,13 @@ public final class MainActivity extends Activity {
         });
         actionButton(view, "保存语言偏好", false, () -> {
             if (!ready[0] || api != connection) return;
-            confirmSubscription(() -> {
-                String first = LanguagePreferences.CODES[audio.getSelectedItemPosition()];
-                String second = LanguagePreferences.CODES[subtitles.getSelectedItemPosition()];
-                worker.execute(() -> {
-                    try {
-                        connection.saveLanguagePreferences(first, second);
-                        onPage(expected, () -> { if (api == connection) status.setText("语言偏好已保存"); });
-                    } catch (Exception ignored) { onPage(expected, () -> status.setText("保存失败，请稍后重试")); }
-                });
+            String first = LanguagePreferences.CODES[audio.getSelectedItemPosition()];
+            String second = LanguagePreferences.CODES[subtitles.getSelectedItemPosition()];
+            worker.execute(() -> {
+                try {
+                    connection.saveLanguagePreferences(first, second);
+                    onPage(expected, () -> { if (api == connection) status.setText("语言偏好已保存"); });
+                } catch (Exception ignored) { onPage(expected, () -> status.setText("保存失败，请稍后重试")); }
             });
         });
     }
@@ -541,6 +547,10 @@ public final class MainActivity extends Activity {
     }
 
     private void connect(ConnectionSettings candidate, long splashReadyAt) {
+        connect(candidate, splashReadyAt, false);
+    }
+
+    private void connect(ConnectionSettings candidate, long splashReadyAt, boolean recoverOnFailure) {
         if (splashReadyAt == 0) {
             LinearLayout view = panel("正在连接 Jellyfin", false, () -> settingsPage(""));
             text(view, "通过家庭 HTTP 代理连接。");
@@ -565,7 +575,10 @@ public final class MainActivity extends Activity {
                 });
             } catch (Exception error) {
                 afterSplash(expected, splashReadyAt, () -> {
-                    connectionFailed(candidate, error);
+                    if (recoverOnFailure && subscriptionController != null
+                            && subscriptionController.state() != null && !subscriptionController.blocked()) {
+                        recoverInitialConnection();
+                    } else connectionFailed(candidate, error);
                 });
             }
         });
@@ -582,6 +595,27 @@ public final class MainActivity extends Activity {
         text(view, message(error, "连接失败"));
         button(view, "重试连接", () -> connect(candidate));
         button(view, "连接设置", () -> settingsPage(""));
+    }
+
+    private void recoverInitialConnection() {
+        LinearLayout view = panel("正在更新连接配置", false, () -> settingsPage(""));
+        text(view, "首次连接失败，正在同步订阅后重试一次。");
+        button(view, "连接设置", () -> settingsPage(""));
+        int expected = page;
+        connectionRecovery = () -> {
+            if (closing || page != expected || api != null || subscriptionController == null) return;
+            SubscriptionSettings latest = subscriptionController.state();
+            if (latest != null && !latest.blocked) connect(latest.configuration.settings(settings));
+        };
+        // If a foreground refresh is already running, consume its outcome instead
+        // of starting a second request. Retries use connect's non-recovery overload.
+        subscriptionController.sync(true);
+    }
+
+    private void finishConnectionRecovery() {
+        Runnable retry = connectionRecovery;
+        connectionRecovery = null;
+        if (retry != null) retry.run();
     }
 
     private boolean homePlayLoading;

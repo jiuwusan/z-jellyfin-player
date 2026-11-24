@@ -272,4 +272,109 @@ final class SubscriptionLifecycleCheck {
       }
     }
   }
+
+  void runConnectionRecovery() {
+    Bundle out = new Bundle();
+    String scope = "startup-recovery-" + UUID.randomUUID();
+    SubscriptionController[] current = new SubscriptionController[1];
+    String saved = test.getTargetContext().getSharedPreferences(SubscriptionSettings.STORE, 0)
+        .getString("sealed", null);
+    java.util.concurrent.atomic.AtomicInteger retries = new java.util.concurrent.atomic.AtomicInteger();
+    try {
+      activity = test.startActivitySync(new Intent(Intent.ACTION_MAIN)
+          .setClassName(test.getTargetContext().getPackageName(), MainActivity.class.getName())
+          .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK));
+      ui(() -> {
+        ((SubscriptionController) field(activity, "subscriptionController")).close();
+        ((java.util.concurrent.ExecutorService) field(activity, "worker")).shutdownNow();
+        ((Handler) field(activity, "ui")).removeCallbacks((Runnable) field(activity, "subscriptionTick"));
+        set(activity, "worker", new java.util.concurrent.AbstractExecutorService() {
+          public void execute(Runnable work) { retries.incrementAndGet(); }
+          public void shutdown() {}
+          public java.util.List<Runnable> shutdownNow() { return java.util.Collections.emptyList(); }
+          public boolean isShutdown() { return false; }
+          public boolean isTerminated() { return false; }
+          public boolean awaitTermination(long time, java.util.concurrent.TimeUnit unit) { return true; }
+        });
+      });
+      for (int mode = 0; mode < 5; mode++) {
+        final int scenario = mode;
+        retries.set(0);
+        java.util.concurrent.atomic.AtomicInteger settled = new java.util.concurrent.atomic.AtomicInteger();
+        java.util.concurrent.atomic.AtomicInteger requests = new java.util.concurrent.atomic.AtomicInteger();
+        java.util.concurrent.CountDownLatch started = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+        ManagedConfiguration config = ManagedConfiguration.parse(SubscriptionCheck.config(1), 57);
+        new SubscriptionSettings(SubscriptionCheck.link(), config, "\"fixture\"",
+            System.currentTimeMillis(), false).save(test.getTargetContext(), scope);
+        OkHttpClient transport = new OkHttpClient.Builder().addInterceptor(chain -> {
+          if (chain.request().url().encodedPath().endsWith("/feedback"))
+            return new Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1)
+                .code(200).message("fixture").body(ResponseBody.create("{}", MediaType.get("application/json"))).build();
+          requests.incrementAndGet();
+          started.countDown();
+          if (scenario == 4) try {
+            if (!release.await(5, java.util.concurrent.TimeUnit.SECONDS)) throw new java.io.IOException("fixture wait");
+          } catch (InterruptedException e) { throw new java.io.IOException(e); }
+          if (scenario == 2) throw new java.io.IOException("controlled offline");
+          String body;
+          try {
+            JSONObject next = SubscriptionCheck.config(2);
+            next.getJSONObject("connection").getJSONObject("proxy").put("host", "changed.example.com");
+            body = next.toString();
+          } catch (Exception e) { throw new java.io.IOException(e); }
+          return new Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1)
+              .code(scenario == 1 ? 200 : scenario == 3 ? 410 : 304).message("fixture")
+              .header("ETag", "\"fixture-next\"")
+              .body(ResponseBody.create(body, MediaType.get("application/json"))).build();
+        }).build();
+        ui(() -> {
+          try {
+            current[0] = new SubscriptionController(test.getTargetContext(), (Handler) field(activity, "ui"),
+                "fixture-device", new SubscriptionController.Listener() {
+                  public void status(String value) {}
+                  public void prepared(SubscriptionController.Prepared value) {
+                    invoke(activity, "applySubscription", new Class<?>[]{SubscriptionController.Prepared.class}, value);
+                  }
+                  public void blocked() { invoke(activity, "showBlockedSubscription", new Class<?>[0]); }
+                  public void settled() {
+                    invoke(activity, "finishConnectionRecovery", new Class<?>[0]);
+                    settled.incrementAndGet();
+                  }
+                }, new SubscriptionClient(57, transport), settings -> null, scope);
+            set(activity, "subscriptionController", current[0]);
+            set(activity, "settings", config.settings(null));
+            set(activity, "api", null);
+            invoke(activity, "recoverInitialConnection", new Class<?>[0]);
+          } catch (Exception e) { throw new AssertionError(e); }
+        });
+        if (scenario == 4) {
+          check(started.await(5, java.util.concurrent.TimeUnit.SECONDS), "Recovery request did not start");
+          ui(() -> invoke(activity, "settingsPage", new Class<?>[]{String.class}, ""));
+          release.countDown();
+        }
+        for (int i = 0; i < 300 && settled.get() == 0; i++) SystemClock.sleep(30);
+        check(settled.get() == 1, "Sync did not settle in scenario " + scenario);
+        int expected = scenario == 3 || scenario == 4 ? 0 : 1;
+        check(requests.get() == 1 && retries.get() == expected, "Unexpected fetch/retry count in scenario " + scenario);
+        ui(() -> invoke(activity, "finishConnectionRecovery", new Class<?>[0]));
+        check(retries.get() == expected, "Recovery completion retried twice");
+        if (scenario == 1) ui(() -> check(
+            ((ConnectionSettings) field(activity, "settings")).host.equals("changed.example.com"),
+            "Recovery did not select new configuration"));
+        current[0].close();
+      }
+      check(java.util.Objects.equals(saved, test.getTargetContext()
+          .getSharedPreferences(SubscriptionSettings.STORE, 0).getString("sealed", null)),
+          "Real subscription cache changed");
+      out.putString("result", "ALL_PASS: 304/new configuration/offline/revoked/navigation/one retry/cache preserved");
+      test.finish(Activity.RESULT_OK, out);
+    } catch (Throwable e) {
+      out.putString("failure", android.util.Log.getStackTraceString(e));
+      test.finish(Activity.RESULT_CANCELED, out);
+    } finally {
+      if (current[0] != null) current[0].close();
+      try { SubscriptionSettings.clear(test.getTargetContext(), scope); } catch (Exception ignored) {}
+    }
+  }
 }

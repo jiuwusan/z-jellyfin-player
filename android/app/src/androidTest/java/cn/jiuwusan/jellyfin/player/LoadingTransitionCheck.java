@@ -57,6 +57,7 @@ public final class LoadingTransitionCheck extends Instrumentation {
         if (failure.get() != null) throw new AssertionError(failure.get());
     }
     @Override public void onStart() {
+        if ("subscription-recovery".equals(collectionSuite)) { new SubscriptionLifecycleCheck(this).runConnectionRecovery(); return; }
         if ("subscription-controller".equals(collectionSuite)) { new SubscriptionControllerCheck(this).run(); return; }
         if ("subscription-lifecycle".equals(collectionSuite)) { new SubscriptionLifecycleCheck(this).run(); return; }
         if ("subscription".equals(collectionSuite)) { new SubscriptionCheck(this).run(); return; }

@@ -13,6 +13,8 @@ final class SubscriptionController {
     void prepared(Prepared value);
 
     void blocked();
+
+    default void settled() {}
   }
 
   interface Validator {
@@ -161,7 +163,9 @@ final class SubscriptionController {
               listener.status("订阅已是最新版本");
             } catch (Exception e) {
               failed(request, "无法保存订阅状态");
+              return;
             }
+            listener.settled();
           });
           return;
         }
@@ -182,6 +186,7 @@ final class SubscriptionController {
           busy = false;
           retained = null;
           listener.prepared(new Prepared(next, verified, request));
+          listener.settled();
         });
       } catch (SubscriptionClient.Revoked e) {
         main.post(() -> {
@@ -200,6 +205,7 @@ final class SubscriptionController {
             nextAttempt = System.currentTimeMillis() + 900_000;
             listener.status("订阅已停用或链接失效，请更新订阅");
             listener.blocked();
+            listener.settled();
           } else failed(request, "订阅链接无效，原有配置已保留");
         });
       } catch (SubscriptionClient.Unsupported e) {
@@ -220,6 +226,7 @@ final class SubscriptionController {
     failures = Math.min(8, failures + 1);
     nextAttempt = System.currentTimeMillis() + Math.min(900_000, 5000L * (1L << failures));
     listener.status(message);
+    listener.settled();
   }
 
   private void success() {

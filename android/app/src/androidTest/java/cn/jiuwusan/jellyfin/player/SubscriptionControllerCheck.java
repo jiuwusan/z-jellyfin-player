@@ -59,6 +59,7 @@ final class SubscriptionControllerCheck {
         test.getTargetContext().getSharedPreferences("connection", 0).getString("sealed", null);
     try {
       AtomicInteger mode = new AtomicInteger(), validated = new AtomicInteger();
+      AtomicInteger settled = new AtomicInteger();
       CountDownLatch revocationStarted = new CountDownLatch(1),
           releaseRevocation = new CountDownLatch(1);
       AtomicReference<SubscriptionController.Prepared> pending = new AtomicReference<>();
@@ -133,6 +134,8 @@ final class SubscriptionControllerCheck {
                     }
 
                     public void blocked() {}
+
+                    public void settled() { settled.incrementAndGet(); }
                   },
                   new SubscriptionClient(57, transport),
                   settings -> {
@@ -149,6 +152,7 @@ final class SubscriptionControllerCheck {
       SubscriptionController controller = instance[0];
       ui(() -> controller.importLink(SubscriptionCheck.link()));
       idle(controller);
+      check(settled.get() == 1, "Initial subscription did not notify completion");
       check(pending.get() != null && validated.get() == 1, "Initial candidate not validated");
       ui(() -> check(controller.state() == null, "Uncommitted candidate replaced active state"));
       ui(() -> {
