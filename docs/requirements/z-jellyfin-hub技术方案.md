@@ -185,8 +185,8 @@ SUBSCRIPTION_ID 是非秘密标识，SECRET 使用密码学安全随机数生成
 
 ## 7. 服务端数据与凭据
 
-- Hub 管理员使用独立账号密码，首次启动设定，不能使用 App 的固定确认密码。登录密码使用成熟密码哈希实现；管理会话使用 HttpOnly、Secure Cookie，管理写操作做 CSRF 防护与登录限流。
-- Jellyfin/代理密码必须能解密下发，不能只做密码哈希；使用带随机 nonce 的 AES-GCM 加密，绑定记录标识和字段类型作为附加认证数据。主密钥从独立 secret 文件挂载，不放镜像、数据库或 Git。
+- Hub 管理员使用独立账号密码，首次启动设定，不能使用 App 的固定确认密码。登录密码使用成熟密码哈希实现；管理会话使用 HttpOnly、SameSite Cookie，浏览器 HTTPS 时添加 Secure，管理写操作做 CSRF 防护与登录限流。
+- Jellyfin/代理密码必须能解密下发，不能只做密码哈希；使用带随机 nonce 的 AES-GCM 加密，绑定记录标识和字段类型作为附加认证数据。主密钥首次自动生成到独立 secrets 卷（0600），不放镜像、数据库或 Git；已有数据库缺少原密钥拒绝启动。
 - 订阅 SECRET 只存摘要，完整链接、密码、Jellyfin token、配置响应正文均不进入日志。后台密码字段默认掩码，未输入新值时保留旧值。
 - 手机沿用 Android Keystore 加密，但订阅秘密、候选配置和最后可用配置要与字幕/音轨偏好分开管理。发布版本快照中的敏感字段同样加密。
 - 配置导入导出和备份默认不明文导出凭据。SQLite 使用一致性备份接口，主密钥另行保管，恢复测试同时核对数据库与密钥，不能只复制运行中的主数据库文件。[SQLite 备份](https://www.sqlite.org/backup.html)、[Go GCM](https://pkg.go.dev/crypto/cipher)。
@@ -195,9 +195,11 @@ SUBSCRIPTION_ID 是非秘密标识，SECRET 使用密码学安全随机数生成
 
 ## 8. 部署建议
 
+Compose environment 仅设置 TZ=Asia/Shanghai，不填写 HUB_PUBLIC_URL。首次网页引导通过容器命令获取的一次性码创建管理员，不预置管理员密码文件。订阅 API 生成相对路径，由浏览器当前地址生成完整链接，支持路径前缀。
+
 优先部署到可从异地直达 HTTPS 的主机。可以使用 NAS Docker，也可使用独立云主机；首版按 NAS 单实例设计。订阅响应很小，Hub 线路不承担媒体吞吐。
 
-容器只提供内部 HTTP 服务，例如容器内 8080/TCP，由 HTTPS 入口转发；数据库位于本地持久化卷，密钥只读挂载。管理入口建议限制访问来源，订阅 API 则供手机正常访问。SQLite WAL 放在本地主机存储，不按多实例/NFS 共享库部署。
+容器只提供内部 HTTP 服务，例如容器内 8097/TCP，由 HTTPS 入口转发；数据库和密钥位于两个独立本地持久化卷。后台不限制域名、IP、端口或 HTTP/HTTPS，保留 CSRF 和会话保护，不设置固定 Origin 白名单；Android 订阅仍要求 HTTPS。SQLite WAL 放在本地主机存储，不按多实例/NFS 共享库部署。
 
 部署时新增 Hub 容器和所需 HTTPS 路由即可，Jellyfin、mihomo 的现有配置无需改变。新增 HTTPS 路由、域名证书和主机端口映射属于实施阶段工作，本方案不执行这些变更。
 
