@@ -14,7 +14,7 @@
 
 ## 自动选轨与字幕
 
-App 使用 PlaybackInfo 返回的 DefaultAudioStreamIndex、DefaultSubtitleStreamIndex，不再根据轨道 Language 执行第二套语言筛选。服务端负责语言偏好、字幕模式、记忆轨道选择及默认轨策略。播放中手动选择仍明确指定索引；关闭为 -1。
+首次打开影片和退出后续播使用 PlaybackInfo 返回的 DefaultAudioStreamIndex、DefaultSubtitleStreamIndex，不根据 App 的全局语言草稿重新筛选。服务端负责语言偏好、字幕模式、记忆轨道选择及默认轨策略。播放中手动选择仍明确指定索引；关闭为 -1。同剧连续播放的手动偏好按新集轨道属性重新匹配，不复用上一集索引；选轨上报与边界见[选轨记忆验收](Android选轨记忆验收.md)。
 
 字幕投递沿用已验证规则：文本由手机绘制，图片由 Jellyfin 烧录。切换时保留位置、暂停状态、音轨和画质。
 

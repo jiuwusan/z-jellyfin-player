@@ -294,12 +294,27 @@ final class JellyfinApi {
     }
 
     Stream stream(Item item, PlaybackPolicy policy, String requestedSource, Integer audioIndex, int subtitleSelection, int forceSubtitleIndex) throws Exception {
+        return stream(item, policy, requestedSource, audioIndex, subtitleSelection, forceSubtitleIndex, null, null);
+    }
+
+    Stream streamNextEpisode(Item item, PlaybackPolicy policy, PlaybackTrackPreference audio,
+                             PlaybackTrackPreference subtitle, int subtitleSelection) throws Exception {
+        return stream(item, policy, null, null, subtitleSelection, -1, audio, subtitle);
+    }
+
+    private Stream stream(Item item, PlaybackPolicy policy, String requestedSource, Integer audioIndex, int subtitleSelection,
+                          int forceSubtitleIndex, PlaybackTrackPreference audioPreference, PlaybackTrackPreference subtitlePreference) throws Exception {
         boolean forceBurn = forceSubtitleIndex >= 0;
         JSONObject initial = playbackInfo(item, requestedSource, forceBurn, forceBurn ? forceSubtitleIndex : null, audioIndex, policy, forceBurn);
         JSONArray sources = initial.optJSONArray("MediaSources");
         if (sources == null || sources.length() == 0) throw new IOException("没有可用片源");
         JSONObject source = requestedSource == null ? sources.getJSONObject(0) : findSource(initial, requestedSource);
         String sourceId = source.getString("Id");
+        if (audioPreference != null) audioIndex = audioPreference.match(mediaTracks(item.id, source, "Audio"), false);
+        if (subtitlePreference != null && subtitleSelection != PlaybackTracks.OFF) {
+            Integer matched = subtitlePreference.match(mediaTracks(item.id, source, "Subtitle"), true);
+            if (matched != null) subtitleSelection = matched;
+        }
         JSONObject video = firstVideo(source);
         int width = video.optInt("Width");
         int height = video.optInt("Height");
@@ -384,8 +399,11 @@ final class JellyfinApi {
                 }
             }
         }
-        return new Stream(item.id, sourceId, session, streamUrl, hls, constrained, resolvedAudio, defaultSubtitle,
+        Stream result = new Stream(item.id, sourceId, session, streamUrl, hls, constrained, resolvedAudio, defaultSubtitle,
                 mediaTracks(item.id, source, "Audio"), mediaTracks(item.id, source, "Subtitle"), burnedSubtitle);
+        result.subtitleSelection = subtitleSelection;
+        result.reportSubtitleIndex = selectedSubtitle;
+        return result;
     }
 
     private HttpUrl resolveServerUrl(String path) {
@@ -454,18 +472,28 @@ final class JellyfinApi {
             String label = title.isEmpty() ? language : title;
             if (label.isEmpty()) label = ("Subtitle".equals(type) ? "字幕 " : "音轨 ") + index;
             if ("Subtitle".equals(type)) label += (external ? " · 外挂" : " · 内嵌") + ("Encode".equals(method) ? " · 服务端烧录" : "");
-            MediaTrack option = new MediaTrack(index, label, language, format, uri, method, embeddedIndex);
+            String rawTitle = track.optString("Title", "");
+            String loweredTitle = rawTitle.toLowerCase(Locale.ROOT);
+            MediaTrack option = new MediaTrack(index, label, language, format, uri, method, embeddedIndex,
+                    rawTitle, track.optBoolean("IsForced"), track.optBoolean("IsHearingImpaired"),
+                    track.optBoolean("IsCommentary") || loweredTitle.contains("commentary") || loweredTitle.contains("评论"));
             result.add(option);
         }
         return result;
     }
 
     void report(Stream stream, String event, long positionMs, boolean paused) throws Exception {
+        report(stream, event, positionMs, paused, stream.reportAudioIndex, stream.reportSubtitleIndex);
+    }
+
+    void report(Stream stream, String event, long positionMs, boolean paused, Integer audioIndex, Integer subtitleIndex) throws Exception {
         String route = event.isEmpty() ? "Sessions/Playing" : "Sessions/Playing/" + event;
         JSONObject body = new JSONObject().put("ItemId", stream.itemId).put("MediaSourceId", stream.sourceId)
                 .put("PlaySessionId", stream.session).put("PositionTicks", Math.max(0, positionMs) * 10_000)
                 .put("IsPaused", paused).put("CanSeek", true)
                 .put("PlayMethod", stream.hls ? "Transcode" : "DirectPlay");
+        if (audioIndex != null && audioIndex >= 0) body.put("AudioStreamIndex", audioIndex);
+        if (subtitleIndex != null && subtitleIndex >= -1) body.put("SubtitleStreamIndex", subtitleIndex);
         json("播放状态", url(route).build(), body);
     }
 
@@ -613,6 +641,8 @@ final class JellyfinApi {
         final boolean hls, constrained;
         final int audioIndex, defaultSubtitleIndex, burnedSubtitleIndex;
         final List<MediaTrack> audio, subtitles;
+        int subtitleSelection = PlaybackTracks.AUTO;
+        Integer reportAudioIndex, reportSubtitleIndex;
         Stream(String itemId, String sourceId, String session, HttpUrl url, boolean hls, boolean constrained,
                int audioIndex, int defaultSubtitleIndex, List<MediaTrack> audio, List<MediaTrack> subtitles, int burnedSubtitleIndex) {
             this.itemId = itemId; this.sourceId = sourceId; this.session = session;
@@ -620,6 +650,8 @@ final class JellyfinApi {
             this.audioIndex = audioIndex; this.defaultSubtitleIndex = defaultSubtitleIndex;
             this.burnedSubtitleIndex = burnedSubtitleIndex;
             this.audio = audio; this.subtitles = subtitles;
+            reportAudioIndex = audioIndex >= 0 ? audioIndex : null;
+            reportSubtitleIndex = burnedSubtitleIndex >= 0 ? burnedSubtitleIndex : defaultSubtitleIndex;
         }
     }
 
@@ -630,12 +662,19 @@ final class JellyfinApi {
         final boolean burnIn;
         final String deliveryMethod;
         final int embeddedStreamIndex;
+        final String title;
+        final boolean forced, hearingImpaired, commentary;
 
         MediaTrack(int index, String label, String language, String format, HttpUrl subtitleUrl, boolean burnIn) {
             this(index, label, language, format, subtitleUrl, burnIn ? "Encode" : "External", -1);
         }
 
         MediaTrack(int index, String label, String language, String format, HttpUrl subtitleUrl, String deliveryMethod, int embeddedStreamIndex) {
+            this(index, label, language, format, subtitleUrl, deliveryMethod, embeddedStreamIndex, "", false, false, false);
+        }
+
+        MediaTrack(int index, String label, String language, String format, HttpUrl subtitleUrl, String deliveryMethod,
+                   int embeddedStreamIndex, String title, boolean forced, boolean hearingImpaired, boolean commentary) {
             this.index = index;
             this.label = label;
             this.language = language;
@@ -644,6 +683,7 @@ final class JellyfinApi {
             this.deliveryMethod = deliveryMethod;
             this.embeddedStreamIndex = embeddedStreamIndex;
             this.burnIn = "Encode".equals(deliveryMethod);
+            this.title = title; this.forced = forced; this.hearingImpaired = hearingImpaired; this.commentary = commentary;
         }
 
         boolean available() {

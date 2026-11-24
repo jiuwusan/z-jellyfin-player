@@ -81,6 +81,7 @@ final class SubtitleHandlingCheck {
     static final class Fixture implements AutoCloseable {
         final ServerSocket server = new ServerSocket(0, 10, java.net.InetAddress.getByName("127.0.0.1"));
         final List<JSONObject> bodies = java.util.Collections.synchronizedList(new ArrayList<>());
+        final List<JSONObject> reports = java.util.Collections.synchronizedList(new ArrayList<>());
         volatile boolean running = true;
         volatile boolean languageScenario;
         volatile JSONArray subtitleOverrides;
@@ -100,7 +101,8 @@ final class SubtitleHandlingCheck {
                     JSONObject request = size == 0 ? new JSONObject() : new JSONObject(body.toString());
                     String response;
                     String status = "200 OK";
-                    if (first.contains("AuthenticateByName")) response = "{\"AccessToken\":\"fixture\",\"User\":{\"Id\":\"fixture\"}}";
+                    if (first.contains("/Sessions/Playing")) { reports.add(request); response = "{}"; }
+                    else if (first.contains("AuthenticateByName")) response = "{\"AccessToken\":\"fixture\",\"User\":{\"Id\":\"fixture\"}}";
                     else if (first.startsWith("POST ") && first.contains("/Users/Configuration?userId=fixture")) {
                         if (rejectConfigurationWrite) status = "403 Forbidden";
                         else { configuration = request; configurationWrites++; }
