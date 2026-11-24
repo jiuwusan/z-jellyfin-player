@@ -418,7 +418,7 @@ public final class MainActivity extends Activity {
     private void applySubscription(SubscriptionController.Prepared prepared) {
         if (closing || subscriptionController == null || !subscriptionController.isCurrent(prepared)) return;
         ConnectionSettings next = prepared.state.configuration.settings(settings);
-        boolean changed = !ManagedConfiguration.sameConnection(settings, next);
+        boolean changed = prepared.api != null || !ManagedConfiguration.sameConnection(settings, next);
         if (changed && playback != null) {
             pendingSubscription = prepared; subscriptionController.pending(prepared); return;
         }

@@ -131,13 +131,14 @@ final class SubscriptionController {
                 link,
                 same ? previous.configuration : null,
                 same && !previous.blocked ? previous.etag : "");
-        if (same
+        if (previous != null
+            && fetched.configuration.sameSource(previous.configuration)
             && (fetched.configuration.revision < previous.configuration.revision
                 || fetched.configuration.revision == previous.configuration.revision
                     && !fetched.configuration.sameContent(previous.configuration)))
           throw new SubscriptionClient.Unsupported();
-        if (same
-            && waiting != null
+        if (waiting != null
+            && fetched.configuration.sameSource(waiting.state.configuration)
             && !fetched.notModified
             && (fetched.configuration.revision < waiting.state.configuration.revision
                 || fetched.configuration.revision == waiting.state.configuration.revision
@@ -168,7 +169,9 @@ final class SubscriptionController {
             fetched.configuration.settings(
                 previous == null ? null : previous.configuration.settings(null));
         JellyfinApi verified =
-            same && fetched.configuration.sameConnection(previous.configuration)
+            same
+                    && fetched.configuration.sameSource(previous.configuration)
+                    && fetched.configuration.sameConnection(previous.configuration)
                 ? null
                 : validator.validate(candidate);
         SubscriptionSettings next =

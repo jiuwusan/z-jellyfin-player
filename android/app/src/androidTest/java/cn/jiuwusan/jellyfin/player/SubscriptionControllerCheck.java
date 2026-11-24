@@ -87,6 +87,15 @@ final class SubscriptionControllerCheck {
                 JSONObject json;
                 try {
                   json = SubscriptionCheck.config(testMode == 4 ? 2 : testMode == 6 ? 3 : 1);
+                  if (testMode == 8 || testMode == 10)
+                    json.put("serverInstanceId", "22222222222222222222222222222222")
+                        .put("subscriptionId", "00000000000000000000000000000002");
+                  if (testMode == 9)
+                    json.put("serverInstanceId", "33333333333333333333333333333333");
+                  if (testMode == 12)
+                    json.put("serverInstanceId", "44444444444444444444444444444444");
+                  if (testMode == 10)
+                    json.getJSONObject("playback").put("totalBitrateBps", 3000000);
                   if (testMode == 3) json.getJSONObject("playback").put("totalBitrateBps", 123);
                   if (testMode == 4)
                     json.getJSONObject("playback")
@@ -125,10 +134,10 @@ final class SubscriptionControllerCheck {
 
                     public void blocked() {}
                   },
-                  new SubscriptionClient(56, transport),
+                  new SubscriptionClient(57, transport),
                   settings -> {
                     validated.incrementAndGet();
-                    if (mode.get() == 6)
+                    if (mode.get() == 6 || mode.get() == 9)
                       throw new java.io.IOException("Controlled invalid connection");
                     return new JellyfinApi(settings, "fixture-device");
                   },
@@ -240,6 +249,54 @@ final class SubscriptionControllerCheck {
           throw new AssertionError(e);
         }
       });
+      pending.set(null);
+      mode.set(0);
+      ui(() ->
+          controller.importLink(
+              SubscriptionCheck.link().replace("hub.example.com", "other.example.com")));
+      idle(controller);
+      ui(() ->
+          check(
+              pending.get() == null && controller.state().configuration.revision == 2,
+              "Different URL bypassed same-source downgrade protection"));
+      int beforeRecovery = validated.get();
+      pending.set(null);
+      mode.set(9);
+      ui(() -> controller.sync(true));
+      idle(controller);
+      ui(() ->
+          check(
+              controller.state().configuration.revision == 2 && pending.get() == null,
+              "Failed recovery replaced last-good configuration"));
+      check(validated.get() == beforeRecovery + 1, "New instance skipped Jellyfin validation");
+      mode.set(8);
+      ui(() -> controller.sync(true));
+      idle(controller);
+      check(
+          pending.get() != null
+              && pending.get().api != null
+              && validated.get() == beforeRecovery + 2,
+          "Rebuilt service did not produce a validated candidate");
+      ui(() -> {
+        try {
+          controller.activate(pending.get());
+        } catch (Exception e) {
+          throw new AssertionError(e);
+        }
+        check(
+            controller.state().configuration.revision == 1
+                && controller.state().link.equals(SubscriptionCheck.link()),
+            "Recovery required a new link or rejected rebuilt revision 1");
+      });
+      pending.set(null);
+      mode.set(10);
+      ui(() -> controller.sync(true));
+      idle(controller);
+      ui(() ->
+          check(
+              pending.get() == null
+                  && controller.state().configuration.settings(null).bitrate == 4000000,
+              "Same-instance same-version content change was accepted"));
       mode.set(5);
       byte[] another = new byte[32];
       another[0] = 1;
@@ -257,6 +314,23 @@ final class SubscriptionControllerCheck {
       check(
           SubscriptionSettings.load(test.getTargetContext(), scope).blocked,
           "Revocation state not persisted");
+      pending.set(null);
+      mode.set(12);
+      ui(() -> controller.sync(true));
+      idle(controller);
+      check(
+          pending.get() != null && pending.get().api != null,
+          "Restored token could not recover blocked device");
+      ui(() -> {
+        try {
+          controller.activate(pending.get());
+        } catch (Exception e) {
+          throw new AssertionError(e);
+        }
+        check(
+            !controller.blocked() && controller.state().link.equals(SubscriptionCheck.link()),
+            "Recovery required subscription re-entry after an unavailable token");
+      });
       ui(() -> {
         try {
           controller.clear();
@@ -289,7 +363,7 @@ final class SubscriptionControllerCheck {
 
                     public void blocked() {}
                   },
-                  new SubscriptionClient(56, transport),
+                  new SubscriptionClient(57, transport),
                   settings -> new JellyfinApi(settings, "fixture-device"),
                   scope);
           check(instance[0].state() == null, "Unreadable cache was treated as valid");
@@ -308,7 +382,8 @@ final class SubscriptionControllerCheck {
           "result",
           "ALL_PASS: validated commit / 304 no reconnect / offline and invalid config fallback /"
               + " quality-only update / obsolete candidate rejected / invalid replacement isolation"
-              + " / persisted revocation and clear");
+              + " / persisted revocation and clear / rebuilt instance recovery at revision 1"
+              + " / failed recovery preserves cache / same-instance downgrade protection");
       test.finish(Activity.RESULT_OK, out);
     } catch (Throwable e) {
       out.putString("failure", android.util.Log.getStackTraceString(e));

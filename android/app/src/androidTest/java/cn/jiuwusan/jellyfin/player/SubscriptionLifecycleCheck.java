@@ -105,9 +105,7 @@ final class SubscriptionLifecycleCheck {
         if (ready[0]) break;
         SystemClock.sleep(100);
       }
-      ManagedConfiguration config =
-          ManagedConfiguration.parse(
-              SubscriptionCheck.config(1), 56, "00000000000000000000000000000001");
+      ManagedConfiguration config = ManagedConfiguration.parse(SubscriptionCheck.config(1), 57);
       new SubscriptionSettings(
               SubscriptionCheck.link(), config, "", System.currentTimeMillis(), true)
           .save(test.getTargetContext(), scope);
@@ -141,7 +139,7 @@ final class SubscriptionLifecycleCheck {
 
                     public void blocked() {}
                   },
-                  new SubscriptionClient(56, fixture),
+                  new SubscriptionClient(57, fixture),
                   settings -> new JellyfinApi(settings, "fixture-device"),
                   scope);
           set(activity, "subscriptionController", controller[0]);
@@ -185,12 +183,29 @@ final class SubscriptionLifecycleCheck {
               "state",
               new SubscriptionSettings(
                   SubscriptionCheck.link(), config, "", System.currentTimeMillis(), false));
+          JSONObject rebuiltJson =
+              SubscriptionCheck.config(1)
+                  .put("serverInstanceId", "22222222222222222222222222222222");
+          ManagedConfiguration rebuilt = ManagedConfiguration.parse(rebuiltJson, 57);
+          SubscriptionController.Prepared rebuiltCandidate =
+              new SubscriptionController.Prepared(
+                  new SubscriptionSettings(
+                      SubscriptionCheck.link(), rebuilt, "", System.currentTimeMillis(), false),
+                  new JellyfinApi(rebuilt.settings(null), "fixture-device"),
+                  0);
+          invoke(
+              activity,
+              "applySubscription",
+              new Class<?>[] {SubscriptionController.Prepared.class},
+              rebuiltCandidate);
+          check(
+              field(activity, "pendingSubscription") == rebuiltCandidate,
+              "Revalidated API with unchanged credentials was discarded during recovery");
           JSONObject json = SubscriptionCheck.config(2);
           json.getJSONObject("connection")
               .getJSONObject("proxy")
               .put("host", "changed.example.com");
-          ManagedConfiguration changed =
-              ManagedConfiguration.parse(json, 56, config.subscriptionId);
+          ManagedConfiguration changed = ManagedConfiguration.parse(json, 57);
           SubscriptionController.Prepared prepared =
               new SubscriptionController.Prepared(
                   new SubscriptionSettings(
@@ -210,10 +225,7 @@ final class SubscriptionLifecycleCheck {
               "Pending config was committed before playback ended");
           JSONObject lower = SubscriptionCheck.config(2);
           lower.getJSONObject("playback").put("resolution", "720p").put("totalBitrateBps", 3000000);
-          set(
-              activity,
-              "settings",
-              ManagedConfiguration.parse(lower, 56, config.subscriptionId).settings(null));
+          set(activity, "settings", ManagedConfiguration.parse(lower, 57).settings(null));
           PlaybackPolicy future =
               (PlaybackPolicy)
                   invoke(page, "policyFor", new Class<?>[] {JellyfinApi.Item.class}, next);

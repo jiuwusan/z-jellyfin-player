@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 2,
+  "subscriptionId": "0123456789abcdef0123456789abcdef",
+  "revision": 1,
+  "minClientVersionCode": 57,
+  "refreshIntervalSeconds": 900,
+  "connection": {
+    "proxy": {
+      "type": "http",
+      "host": "proxy.example.com",
+      "port": 8080,
+      "username": "example",
+      "password": "example-placeholder"
+    },
+    "jellyfin": {
+      "baseUrl": "http://media.internal:8096/jellyfin",
+      "username": "example",
+      "password": "example-placeholder"
+    }
+  },
+  "playback": {
+    "resolution": "1080p",
+    "totalBitrateBps": 4000000
+  },
+  "serverInstanceId": "11111111111111111111111111111111"
+}

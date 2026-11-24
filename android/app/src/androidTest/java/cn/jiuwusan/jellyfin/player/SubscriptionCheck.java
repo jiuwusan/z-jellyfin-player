@@ -26,15 +26,15 @@ final class SubscriptionCheck {
   }
 
   static String link() {
-    return "https://hub.example.com/prefix/api/v1/subscriptions/00000000000000000000000000000001/config#"
+    return "https://hub.example.com/prefix/api/v1/subscription/config#"
         + Base64.encodeToString(new byte[32], Base64.URL_SAFE | Base64.NO_PADDING | Base64.NO_WRAP);
   }
 
   static JSONObject config(int revision) throws Exception {
     return new JSONObject(
-        "{\"schemaVersion\":1,\"subscriptionId\":\"00000000000000000000000000000001\",\"revision\":"
+        "{\"schemaVersion\":2,\"serverInstanceId\":\"11111111111111111111111111111111\",\"subscriptionId\":\"00000000000000000000000000000001\",\"revision\":"
             + revision
-            + ",\"minClientVersionCode\":56,\"refreshIntervalSeconds\":900,\"connection\":{\"proxy\":{\"type\":\"http\",\"host\":\"proxy.example.com\",\"port\":8080,\"username\":\"fixture\",\"password\":\"fixture-proxy\"},\"jellyfin\":{\"baseUrl\":\"http://media.internal:8096/jellyfin\",\"username\":\"fixture\",\"password\":\"fixture-only\"}},\"playback\":{\"resolution\":\"1080p\",\"totalBitrateBps\":4000000}}");
+            + ",\"minClientVersionCode\":57,\"refreshIntervalSeconds\":900,\"connection\":{\"proxy\":{\"type\":\"http\",\"host\":\"proxy.example.com\",\"port\":8080,\"username\":\"fixture\",\"password\":\"fixture-proxy\"},\"jellyfin\":{\"baseUrl\":\"http://media.internal:8096/jellyfin\",\"username\":\"fixture\",\"password\":\"fixture-only\"}},\"playback\":{\"resolution\":\"1080p\",\"totalBitrateBps\":4000000}}");
   }
 
   void run() {
@@ -54,13 +54,13 @@ final class SubscriptionCheck {
         throw new AssertionError("URL userinfo accepted");
       } catch (IllegalArgumentException expected) {
       }
-      ManagedConfiguration config = ManagedConfiguration.parse(config(1), 56, link.id);
+      ManagedConfiguration config = ManagedConfiguration.parse(config(1), 57);
       ConnectionSettings runtime = config.settings(null);
       check(runtime.resolution == 1920 && runtime.bitrate == 4000000, "Quality mapping changed");
       JSONObject invalid = config(1);
       invalid.getJSONObject("playback").put("totalBitrateBps", 123);
       try {
-        ManagedConfiguration.parse(invalid, 56, link.id);
+        ManagedConfiguration.parse(invalid, 57);
         throw new AssertionError("Unsupported remote bitrate defaulted silently");
       } catch (IllegalArgumentException expected) {
       }
@@ -92,7 +92,7 @@ final class SubscriptionCheck {
                     .build();
               })
               .build();
-      SubscriptionClient client = new SubscriptionClient(56, fixture);
+      SubscriptionClient client = new SubscriptionClient(57, fixture);
       check(client.directProxy() == Proxy.NO_PROXY, "Hub client depends on configured proxy");
       SubscriptionClient.Fetch fetched = client.fetch(link, null, "");
       check(fetched.configuration.revision == 1, "Config not parsed");
@@ -116,10 +116,27 @@ final class SubscriptionCheck {
       check(
           loaded.configuration.revision == 1 && loaded.link.equals(state.link),
           "Encrypted state roundtrip failed");
+      fetched.configuration.raw.put("schemaVersion", 1).remove("serverInstanceId");
+      String legacyLink =
+          link.raw.replace(
+              "/subscription/config", "/subscriptions/00000000000000000000000000000001/config");
+      new SubscriptionSettings(legacyLink, fetched.configuration, "legacy-etag", 12345, false)
+          .save(test.getTargetContext(), scope);
+      SubscriptionSettings migrated = SubscriptionSettings.load(test.getTargetContext(), scope);
+      check(
+          migrated.link.equals(link.raw)
+              && migrated.etag.isEmpty()
+              && migrated.configuration.raw.getInt("schemaVersion") == 2,
+          "Trusted cached subscription required re-entering link after protocol upgrade");
+      try {
+        ManagedConfiguration.parse(config(1).put("schemaVersion", 1), 57);
+        throw new AssertionError("Network v1 configuration accepted");
+      } catch (IllegalArgumentException expected) {
+      }
       out.putString(
           "result",
           "ALL_PASS: HTTPS-only / fragment bearer / direct bootstrap / strict schema / quality"
-              + " mapping / 304 / revocation / isolated encrypted cache");
+              + " mapping / 304 / revocation / encrypted cache and automatic v1 migration");
       test.finish(Activity.RESULT_OK, out);
     } catch (Throwable e) {
       out.putString("failure", android.util.Log.getStackTraceString(e));

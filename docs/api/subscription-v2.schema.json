@@ -1,0 +1,153 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "z-jellyfin-hub subscription v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "serverInstanceId",
+    "subscriptionId",
+    "revision",
+    "minClientVersionCode",
+    "refreshIntervalSeconds",
+    "connection",
+    "playback"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 2
+    },
+    "subscriptionId": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{32}$"
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "minClientVersionCode": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "refreshIntervalSeconds": {
+      "type": "integer",
+      "minimum": 300,
+      "maximum": 86400
+    },
+    "connection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "proxy",
+        "jellyfin"
+      ],
+      "properties": {
+        "proxy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "host",
+            "port",
+            "username",
+            "password"
+          ],
+          "properties": {
+            "type": {
+              "const": "http"
+            },
+            "host": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 253
+            },
+            "port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            "username": {
+              "type": "string",
+              "maxLength": 256
+            },
+            "password": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          }
+        },
+        "jellyfin": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "baseUrl",
+            "username",
+            "password"
+          ],
+          "properties": {
+            "baseUrl": {
+              "type": "string",
+              "pattern": "^https?://",
+              "maxLength": 2048
+            },
+            "username": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "password": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            }
+          }
+        }
+      }
+    },
+    "playback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "resolution",
+        "totalBitrateBps"
+      ],
+      "properties": {
+        "resolution": {
+          "enum": [
+            "auto",
+            "screen",
+            "360p",
+            "480p",
+            "720p",
+            "1080p",
+            "4k",
+            "8k"
+          ]
+        },
+        "totalBitrateBps": {
+          "enum": [
+            0,
+            120000000,
+            80000000,
+            60000000,
+            40000000,
+            20000000,
+            15000000,
+            10000000,
+            8000000,
+            6000000,
+            4000000,
+            3000000,
+            1500000,
+            720000,
+            420000
+          ]
+        }
+      }
+    },
+    "serverInstanceId": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{32}$"
+    }
+  }
+}

@@ -71,12 +71,19 @@ final class SubscriptionSettings {
         new JSONObject(
             new String(
                 cipher.doFinal(Base64.decode(pieces[1], Base64.DEFAULT)), StandardCharsets.UTF_8));
-    SubscriptionClient.Link link = SubscriptionClient.Link.parse(json.getString("link"));
+    JSONObject saved = json.getJSONObject("configuration");
+    SubscriptionClient.Link link =
+        SubscriptionClient.Link.fromCache(
+            json.getString("link"), saved.getString("subscriptionId"));
+    boolean legacy = saved.optInt("schemaVersion") == 1;
+    if (legacy) {
+      saved.put("schemaVersion", 2).put("serverInstanceId", "00000000000000000000000000000000");
+    }
+
     return new SubscriptionSettings(
         link.raw,
-        ManagedConfiguration.parse(
-            json.getJSONObject("configuration"), SubscriptionClient.appVersion(context), link.id),
-        json.optString("etag", ""),
+        ManagedConfiguration.parse(saved, SubscriptionClient.appVersion(context)),
+        legacy ? "" : json.optString("etag", ""),
         json.optLong("checkedAt", 0),
         json.optBoolean("blocked", false));
   }

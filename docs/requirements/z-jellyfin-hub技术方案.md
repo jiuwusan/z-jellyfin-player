@@ -80,12 +80,12 @@ Go embed 可将静态资源编译进程序；Vue 官方提供 TypeScript/Vite �
 推荐链接格式：
 
 ```text
-https://hub.example.com/api/v1/subscriptions/SUBSCRIPTION_ID/config#SECRET
+https://hub.example.com/api/v1/subscription/config#SECRET
 ```
 
 App 提取 fragment 中的 SECRET，去掉 fragment 后请求该 HTTPS 地址，将 SECRET 放入 `Authorization: Bearer`。fragment 不作为 HTTP 请求路径或查询参数发送，减少反向代理访问日志泄漏完整凭据的机会。后台、App 仍不得记录完整链接或认证头。
 
-SUBSCRIPTION_ID 是非秘密标识，SECRET 使用密码学安全随机数生成，至少 32 字节，采用 Base64URL 编码。服务器仅保存令牌摘要并做恒定时间比较；完整链接只在创建或轮换时展示，丢失后重新生成。令牌轮换与配置版本更新是两项独立操作。
+链接不含订阅 ID，SECRET 唯一绑定订阅；内部 ID 只用于数据库关联。默认生成 32 随机字节的规范 Base64URL 令牌（43 字符），支持手动指定和恢复备份令牌。服务仅保存摘要，通过唯一索引禁止重复绑定，拒绝含空白/CRLF/非规范尾位的输入；完整链接只在创建/设置时展示，需另行备份。令牌轮换与配置版本更新是两项独立操作。
 
 订阅请求使用独立网络客户端，显式直连，不使用下发代理、不附带 Jellyfin 或代理认证头、不共享 Jellyfin Cookie。保留 URL 路径前缀；禁止 HTTP 降级、跳过证书校验及自动跨站重定向。第一版可直接禁止订阅接口重定向。
 
@@ -95,10 +95,11 @@ SUBSCRIPTION_ID 是非秘密标识，SECRET 使用密码学安全随机数生成
 
 ```json
 {
-  "schemaVersion": 1,
-  "subscriptionId": "SUBSCRIPTION_ID",
+  "schemaVersion": 2,
+  "serverInstanceId": "11111111111111111111111111111111",
+  "subscriptionId": "0123456789abcdef0123456789abcdef",
   "revision": 12,
-  "minClientVersionCode": 56,
+  "minClientVersionCode": 57,
   "refreshIntervalSeconds": 900,
   "connection": {
     "proxy": {
@@ -121,7 +122,7 @@ SUBSCRIPTION_ID 是非秘密标识，SECRET 使用密码学安全随机数生成
 }
 ```
 
-示例的最低客户端构建号不代表当前 0.6.41 已支持订阅；以实际接入版本为准。第一版只下发现有 HTTP 代理方式，代理用户名/密码可按现有方式留空；Jellyfin 授权仍使用个人账号密码，沿用现有自动登录。
+schema v2 从 Android 0.6.43 / 57 支持；v1 仅保留作设备内已有加密缓存的迁移来源，网络使用 v2。第一版只下发现有 HTTP 代理方式，代理用户名/密码可按现有方式留空；Jellyfin 授权仍使用个人账号密码，沿用现有自动登录。
 
 分辨率支持 `auto`、`screen`、`360p`、`480p`、`720p`、`1080p`、`4k`、`8k`。合计码率保留当前客户端支持的选项，`0` 表示自动。服务端与 App 都严格校验枚举、端口、地址、字段类型和必要字段，不将非法远程值默默替换成默认值。
 
@@ -131,8 +132,8 @@ SUBSCRIPTION_ID 是非秘密标识，SECRET 使用密码学安全随机数生成
 
 | 接口 | 用途 |
 | --- | --- |
-| `GET /api/v1/subscriptions/{id}/config` | 获取经过鉴权的完整配置；支持 ETag / If-None-Match |
-| `POST /api/v1/subscriptions/{id}/feedback` | 上报已应用版本或错误类别；使用订阅令牌鉴权 |
+| `GET /api/v1/subscription/config` | 获取经过鉴权的完整配置；支持 ETag / If-None-Match |
+| `POST /api/v1/subscription/feedback` | 上报已应用版本或错误类别；使用订阅令牌鉴权 |
 | `/api/v1/admin/...` | 后台登录、模板与授权管理、订阅及发布管理 |
 | `GET /health/live`、`GET /health/ready` | 容器健康检查，不返回凭据或配置 |
 
@@ -144,9 +145,11 @@ SUBSCRIPTION_ID 是非秘密标识，SECRET 使用密码学安全随机数生成
 
 ## 5. Android 配置生命周期
 
+版本序列按 serverInstanceId + subscriptionId 划分，同来源禁止回退和同版本改内容；不同来源必须重新验证代理/Jellyfin，成功后可接受版本 1。实例标识随数据库持久化，重启/完整备份保留，新数据库产生新标识；ETag 包含实例/订阅/版本。灾后在原 HTTPS 入口重建配置并绑定原令牌、发布，设备原链接无需重新填写。已验证旧缓存自动迁移固定链接、清旧 ETag，随后刷新，不恢复旧版手动设置入口。
+
 ### 5.1 首次导入
 
-1. 输入订阅链接，解析并校验 HTTPS、订阅标识及 SECRET。
+1. 输入订阅链接，解析并校验 HTTPS、固定订阅路径及 SECRET。
 2. 直连 Hub 获取候选配置，总请求超时建议 8 秒，响应体限制建议 64 KiB。
 3. 校验协议版本、App 兼容性、字段与现有画质选项，验证对应 HTTP 代理和 Jellyfin 登录。
 4. 全部成功后原子保存订阅信息与“最后一次可用配置”，进入首页。

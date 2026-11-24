@@ -4,16 +4,23 @@ import org.json.JSONObject;
 
 /** Strict remote boundary; only existing supported runtime settings may enter the app. */
 final class ManagedConfiguration {
-  final String subscriptionId;
+  final String subscriptionId, serverInstanceId;
   final long revision;
   final int refreshSeconds, minClient;
   final JSONObject raw;
   private final ConnectionSettings runtime;
 
   private ManagedConfiguration(
-      JSONObject raw, String id, long revision, int refresh, int min, ConnectionSettings runtime) {
+      JSONObject raw,
+      String id,
+      String instance,
+      long revision,
+      int refresh,
+      int min,
+      ConnectionSettings runtime) {
     this.raw = raw;
     subscriptionId = id;
+    serverInstanceId = instance;
     this.revision = revision;
     refreshSeconds = refresh;
     minClient = min;
@@ -37,12 +44,14 @@ final class ManagedConfiguration {
     return (String) text;
   }
 
-  static ManagedConfiguration parse(JSONObject value, int clientVersion, String expectedId) {
+  static ManagedConfiguration parse(JSONObject value, int clientVersion) {
     try {
-      if (integer(value, "schemaVersion") != 1)
+      if (integer(value, "schemaVersion") != 2)
         throw new IllegalArgumentException("不支持的订阅协议，请更新 App");
       String id = string(value, "subscriptionId", 64);
-      if (!id.equals(expectedId)) throw new IllegalArgumentException("订阅标识不匹配");
+      String instance = string(value, "serverInstanceId", 32);
+      if (!id.matches("[0-9a-f]{32}") || !instance.matches("[0-9a-f]{32}"))
+        throw new IllegalArgumentException("订阅标识无效");
       Object rev = value.get("revision");
       if (!(rev instanceof Integer) && !(rev instanceof Long) || ((Number) rev).longValue() < 1)
         throw new IllegalArgumentException("配置版本无效");
@@ -81,7 +90,7 @@ final class ManagedConfiguration {
               width,
               rate);
       return new ManagedConfiguration(
-          new JSONObject(value.toString()), id, revision, refresh, min, settings);
+          new JSONObject(value.toString()), id, instance, revision, refresh, min, settings);
     } catch (IllegalArgumentException e) {
       throw e;
     } catch (Exception e) {
@@ -106,6 +115,12 @@ final class ManagedConfiguration {
         runtime.bitrate,
         sameUser ? previous.audioLanguage : LanguagePreferences.DEFAULT,
         sameUser ? previous.subtitleLanguage : LanguagePreferences.DEFAULT);
+  }
+
+  boolean sameSource(ManagedConfiguration other) {
+    return other != null
+        && serverInstanceId.equals(other.serverInstanceId)
+        && subscriptionId.equals(other.subscriptionId);
   }
 
   boolean sameConnection(ManagedConfiguration other) {

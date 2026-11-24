@@ -19,12 +19,11 @@ import org.json.JSONObject;
 
 final class SubscriptionClient {
   static final class Link {
-    final String raw, id, secret;
+    final String raw, secret;
     final HttpUrl url;
 
-    private Link(String raw, String id, String secret, HttpUrl url) {
+    private Link(String raw, String secret, HttpUrl url) {
       this.raw = raw;
-      this.id = id;
       this.secret = secret;
       this.url = url;
     }
@@ -40,12 +39,11 @@ final class SubscriptionClient {
       String secret = parsed.fragment();
       java.util.List<String> segments = parsed.pathSegments();
       int n = segments.size();
-      if (n < 5
+      if (n < 4
           || !"config".equals(segments.get(n - 1))
-          || !segments.get(n - 2).matches("[0-9a-f]{32}")
-          || !"subscriptions".equals(segments.get(n - 3))
-          || !"v1".equals(segments.get(n - 4))
-          || !"api".equals(segments.get(n - 5))
+          || !"subscription".equals(segments.get(n - 2))
+          || !"v1".equals(segments.get(n - 3))
+          || !"api".equals(segments.get(n - 4))
           || secret == null
           || !secret.matches("[A-Za-z0-9_-]{43}")) throw new IllegalArgumentException("订阅链接格式无效");
       byte[] decoded;
@@ -57,11 +55,31 @@ final class SubscriptionClient {
       if (decoded.length != 32
           || !Base64.encodeToString(decoded, Base64.URL_SAFE | Base64.NO_PADDING | Base64.NO_WRAP)
               .equals(secret)) throw new IllegalArgumentException("订阅令牌无效");
-      return new Link(
-          parsed.toString(),
-          segments.get(n - 2),
-          secret,
-          parsed.newBuilder().fragment(null).build());
+      return new Link(parsed.toString(), secret, parsed.newBuilder().fragment(null).build());
+    }
+
+    static Link fromCache(String raw, String expectedId) {
+      try {
+        return parse(raw);
+      } catch (IllegalArgumentException ignored) {
+      }
+      HttpUrl parsed = HttpUrl.parse(raw);
+      if (parsed == null) throw new IllegalArgumentException("订阅缓存无效");
+      java.util.List<String> parts = parsed.pathSegments();
+      int n = parts.size();
+      if (n < 5
+          || !"api".equals(parts.get(n - 5))
+          || !"v1".equals(parts.get(n - 4))
+          || !"subscriptions".equals(parts.get(n - 3))
+          || !parts.get(n - 2).equals(expectedId)
+          || !"config".equals(parts.get(n - 1))) throw new IllegalArgumentException("订阅缓存无效");
+      return parse(
+          parsed
+              .newBuilder()
+              .removePathSegment(n - 2)
+              .setPathSegment(n - 3, "subscription")
+              .build()
+              .toString());
     }
 
     @Override
@@ -163,7 +181,7 @@ final class SubscriptionClient {
       try {
         value =
             ManagedConfiguration.parse(
-                new JSONObject(bytes.toString(StandardCharsets.UTF_8.name())), version, link.id);
+                new JSONObject(bytes.toString(StandardCharsets.UTF_8.name())), version);
       } catch (Exception e) {
         throw new Unsupported();
       }
