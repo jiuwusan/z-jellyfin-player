@@ -193,28 +193,44 @@ final class JellyfinApi {
     }
 
     Bitmap artwork(Item item, boolean wide, String seriesBackdropId, boolean originalWidth) throws IOException {
+        return artwork(item, wide, seriesBackdropId, originalWidth, 0, 0);
+    }
+
+    Bitmap artwork(Item item, boolean wide, String seriesBackdropId, boolean originalWidth,
+                   int displayWidth, int displayHeight) throws IOException {
         int backdropWidth = originalWidth ? 0 : 640;
         int posterWidth = originalWidth ? 0 : 420;
+        int decodeWidth = originalWidth ? displayWidth : 0;
+        int decodeHeight = originalWidth ? displayHeight : 0;
         if (!seriesBackdropId.isEmpty()) {
             try {
-                Bitmap backdrop = image(seriesBackdropId, "Backdrop/0", backdropWidth);
+                Bitmap backdrop = image(seriesBackdropId, "Backdrop/0", backdropWidth, decodeWidth, decodeHeight);
                 if (backdrop != null) return backdrop;
             } catch (IOException ignored) {
                 // The episode's own artwork may still be available.
             }
         }
         if (wide && item.hasBackdrop) {
-            Bitmap backdrop = image(item.id, "Backdrop/0", backdropWidth);
+            Bitmap backdrop = image(item.id, "Backdrop/0", backdropWidth, decodeWidth, decodeHeight);
             if (backdrop != null) return backdrop;
         }
         if (item.hasPoster) {
-            Bitmap poster = image(item.id, "Primary", posterWidth);
+            Bitmap poster = image(item.id, "Primary", posterWidth, decodeWidth, decodeHeight);
             if (poster != null) return poster;
         }
-        return item.seriesId.isEmpty() ? null : image(item.seriesId, "Primary", posterWidth);
+        return item.seriesId.isEmpty() ? null : image(item.seriesId, "Primary", posterWidth, decodeWidth, decodeHeight);
     }
 
     private Bitmap image(String id, String type, int width) throws IOException {
+        return image(id, type, width, 0, 0);
+    }
+
+    Bitmap backdrop(String id, boolean originalWidth, int displayWidth, int displayHeight) throws IOException {
+        return image(id, "Backdrop/0", originalWidth ? 0 : 640,
+                originalWidth ? displayWidth : 0, originalWidth ? displayHeight : 0);
+    }
+
+    private Bitmap image(String id, String type, int width, int displayWidth, int displayHeight) throws IOException {
         HttpUrl.Builder imageUrl = url("Items/" + id + "/Images/" + type).addQueryParameter("quality", "80");
         if (width > 0) imageUrl.addQueryParameter("maxWidth", Integer.toString(width));
         Request request = new Request.Builder().url(imageUrl.build())
@@ -222,8 +238,18 @@ final class JellyfinApi {
         Call call = http.newCall(request);
         call.timeout().timeout(8, TimeUnit.SECONDS);
         try (Response response = call.execute()) {
-            return response.isSuccessful() && response.body() != null
-                    ? BitmapFactory.decodeStream(response.body().byteStream()) : null;
+            if (!response.isSuccessful() || response.body() == null) return null;
+            if (displayWidth <= 0 || displayHeight <= 0) return BitmapFactory.decodeStream(response.body().byteStream());
+            // The server request remains original-size. Sample locally before allocating the bitmap.
+            BitmapFactory.Options bounds = new BitmapFactory.Options();
+            bounds.inJustDecodeBounds = true;
+            BitmapFactory.decodeStream(response.body().source().peek().inputStream(), null, bounds);
+            BitmapFactory.Options options = new BitmapFactory.Options();
+            options.inSampleSize = 1;
+            while (bounds.outWidth / (options.inSampleSize * 2) >= displayWidth
+                    && bounds.outHeight / (options.inSampleSize * 2) >= displayHeight
+                    && options.inSampleSize < 128) options.inSampleSize *= 2;
+            return BitmapFactory.decodeStream(response.body().byteStream(), null, options);
         }
     }
 
@@ -534,8 +560,12 @@ final class JellyfinApi {
 
     static final class Item {
         final String id, title, seriesName, seriesId, seriesBackdropId, overview, type, collectionType;
-        final boolean series, collection, folder, hasPoster, hasBackdrop, played;
-        final long durationMs, resumeMs;
+        final String posterTag, backdropTag, seriesBackdropTag;
+        final boolean series, collection, folder, hasPoster, hasBackdrop;
+        final long durationMs;
+        // Session-local progress is updated on the UI thread when playback stops.
+        boolean played;
+        long resumeMs;
         final int year, index, season, childCount;
         int seriesYear;
 
@@ -564,13 +594,16 @@ final class JellyfinApi {
             resumeMs = Math.max(0, position) / 10_000;
             JSONObject tags = entry.optJSONObject("ImageTags");
             hasPoster = tags != null && tags.has("Primary");
+            posterTag = tags == null ? "" : tags.optString("Primary", "");
             JSONArray backdrops = entry.optJSONArray("BackdropImageTags");
             hasBackdrop = backdrops != null && backdrops.length() > 0;
+            backdropTag = backdrops == null ? "" : backdrops.optString(0, "");
             JSONArray parentBackdrops = entry.optJSONArray("ParentBackdropImageTags");
             String parentBackdropId = entry.optString("ParentBackdropItemId", "");
             seriesBackdropId = "Episode".equals(type) && !seriesId.isEmpty()
                     && seriesId.equalsIgnoreCase(parentBackdropId)
                     && parentBackdrops != null && parentBackdrops.length() > 0 ? seriesId : "";
+            seriesBackdropTag = seriesBackdropId.isEmpty() ? "" : parentBackdrops.optString(0, "");
         }
     }
 

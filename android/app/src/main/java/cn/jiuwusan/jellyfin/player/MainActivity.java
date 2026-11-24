@@ -75,8 +75,6 @@ public final class MainActivity extends Activity {
     private final Handler ui = new Handler(Looper.getMainLooper());
     private final LibraryUi libraryUi = new LibraryUi(this, ui);
     private ConnectionSettings settings;
-    private ConnectionSettings draft;
-    private boolean draftSaveLanguages;
     private JellyfinApi api;
     private JellyfinApi.Stream stream;
     private ExoPlayer player;
@@ -93,6 +91,36 @@ public final class MainActivity extends Activity {
     private boolean playbackStarted;
     private String query = "";
     private int searchRequest;
+    private SubscriptionController subscriptionController;
+    private SubscriptionController.Prepared pendingSubscription;
+    private TextView subscriptionStatus, managedQuality;
+    private boolean closing;
+    private String subscriptionMessage = "";
+    private final Runnable subscriptionTick = new Runnable() {
+        @Override public void run() {
+            if (closing || subscriptionController == null) return;
+            subscriptionController.sync(false);
+            ui.postDelayed(this, 30_000);
+        }
+    };
+    private final BrowseMemory browseMemory = new BrowseMemory(40);
+    private LibraryCatalog savedCatalog;
+    private ScrollView rememberedScroll;
+    private String rememberedKey;
+    private LibraryLocation rememberedLibrary;
+    private boolean homeDirty;
+    private int browsingWidthPixels;
+    private int browsingHeightDp;
+    private static final class LocalProgress {
+        final JellyfinApi.Item item;
+        final long position;
+        final boolean ended;
+        boolean reported;
+        LocalProgress(JellyfinApi.Item item, long position, boolean ended) {
+            this.item = item; this.position = position; this.ended = ended;
+        }
+    }
+    private final java.util.LinkedHashMap<String, LocalProgress> localProgress = new java.util.LinkedHashMap<>();
     private BrowseTab browseTab = BrowseTab.HOME;
     private static final String SETTINGS_CONFIRMATION = "jellyfin";
 
@@ -118,6 +146,8 @@ public final class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        browsingWidthPixels = getResources().getDisplayMetrics().widthPixels;
+        browsingHeightDp = getResources().getConfiguration().screenHeightDp;
         getWindow().setStatusBarColor(LibraryUi.BACKGROUND);
         getWindow().setNavigationBarColor(LibraryUi.BACKGROUND);
         StartupSplashView splash = new StartupSplashView(this, libraryUi);
@@ -130,12 +160,25 @@ public final class MainActivity extends Activity {
             getPreferences(0).edit().putString("device", device).apply();
         }
         try {
-            settings = ConnectionSettings.load(this);
+            subscriptionController = new SubscriptionController(this, ui, device, new SubscriptionController.Listener() {
+                @Override public void status(String message) {
+                    subscriptionMessage = message;
+                    if (subscriptionStatus != null && subscriptionStatus.isAttachedToWindow()) subscriptionStatus.setText(message);
+                }
+                @Override public void prepared(SubscriptionController.Prepared prepared) { applySubscription(prepared); }
+                @Override public void blocked() {
+                    pendingSubscription = null;
+                    if (playback == null) showBlockedSubscription();
+                    else { playback.autoAdvancePending = false; playback.updateActions(); }
+                }
+            });
+            SubscriptionSettings subscribed = subscriptionController.state();
+            settings = subscribed == null || subscribed.blocked ? null : subscribed.configuration.settings(null);
             if (settings == null) {
                 afterSplash(launchPage, splashReadyAt, () -> settingsPage(""));
             } else {
                 ui.postDelayed(() -> onPage(launchPage, () -> splash.showConnectionStatus(() -> settingsPage(""))), 1600);
-                connect(settings, false, splashReadyAt);
+                connect(settings, splashReadyAt);
             }
         } catch (Exception error) {
             afterSplash(launchPage, splashReadyAt, () -> settingsPage("无法读取已保存的配置，请重新填写。"));
@@ -147,6 +190,7 @@ public final class MainActivity extends Activity {
     }
 
     private LinearLayout panel(String title, boolean scroll, Runnable back, BrowseTab nav) {
+        rememberBrowsePosition();
         backAction = back;
         page++;
         LinearLayout root = column();
@@ -265,100 +309,138 @@ public final class MainActivity extends Activity {
     }
 
     private void settingsPage(String message) {
-        Runnable back = browseTab == BrowseTab.LIBRARY ? this::librariesPage : this::homePage;
-        LinearLayout view = api == null ? panel("连接设置", true, null)
-                : panel("连接设置", true, back, BrowseTab.SETTINGS);
-        ConnectionSettings old = draft == null ? settings : draft;
-        section(view, "家庭 HTTP 代理");
-        LinearLayout address = new LinearLayout(this);
-        if (getResources().getConfiguration().screenWidthDp <= 355) address.setOrientation(LinearLayout.VERTICAL);
-        view.addView(address);
-        LinearLayout hostGroup = column();
-        hostGroup.setPadding(0, 0, dp(10), 0);
-        address.addView(hostGroup, address.getOrientation() == LinearLayout.VERTICAL
-                ? new LinearLayout.LayoutParams(-1, -2) : new LinearLayout.LayoutParams(0, -2, 1));
-        LinearLayout portGroup = column();
-        address.addView(portGroup, new LinearLayout.LayoutParams(address.getOrientation() == LinearLayout.VERTICAL ? -1 : dp(100), -2));
-        EditText host = settingsField(hostGroup, "代理地址", old == null ? "" : old.host, false);
-        EditText port = settingsField(portGroup, "端口", old == null ? "" : Integer.toString(old.port), false);
-        port.setInputType(InputType.TYPE_CLASS_NUMBER);
-        EditText proxyUser = settingsField(view, "代理用户名", old == null ? "" : old.proxyUser, false);
-        EditText proxyPassword = settingsField(view, "代理密码", old == null ? "" : old.proxyPassword, true);
-        settingsSection(view, "Jellyfin 授权");
-        EditText server = settingsField(view, "服务器地址", old == null ? "" : old.server.toString(), false);
-        EditText username = settingsField(view, "Jellyfin 账号", old == null ? "" : old.user, false);
-        EditText password = settingsField(view, "Jellyfin 密码", old == null ? "" : old.password, true);
-        settingsSection(view, "播放画质");
-        LinearLayout qualities = new LinearLayout(this);
-        qualities.setOrientation(LinearLayout.VERTICAL);
-        view.addView(qualities);
-        Spinner resolution = qualityField(qualities, "分辨率上限", PlaybackPolicy.RESOLUTION_LABELS,
-                PlaybackPolicy.optionIndex(PlaybackPolicy.WIDTHS, old == null ? PlaybackPolicy.WIDTH : old.resolution, PlaybackPolicy.WIDTH));
-        Spinner bitrate = qualityField(qualities, "码率上限（音视频合计）", PlaybackPolicy.RATE_LABELS,
-                PlaybackPolicy.optionIndex(PlaybackPolicy.RATES, old == null ? PlaybackPolicy.TOTAL_BPS : old.bitrate, PlaybackPolicy.TOTAL_BPS));
-        settingsSection(view, "播放语言");
-        Spinner audioLanguage = qualityField(view, "首选的音频语言", LanguagePreferences.LABELS,
-                LanguagePreferences.optionIndex(old == null ? LanguagePreferences.DEFAULT : old.audioLanguage));
-        Spinner subtitleLanguage = qualityField(view, "字幕语言偏好", LanguagePreferences.LABELS,
-                LanguagePreferences.optionIndex(old == null ? LanguagePreferences.DEFAULT : old.subtitleLanguage));
-        String[] accountLanguages = { old == null ? LanguagePreferences.DEFAULT : old.audioLanguage,
-                old == null ? LanguagePreferences.DEFAULT : old.subtitleLanguage };
-        String[][] languageCodes = { languageOptions(audioLanguage, accountLanguages[0]),
-                languageOptions(subtitleLanguage, accountLanguages[1]) };
-        int[] accountSelections = { audioLanguage.getSelectedItemPosition(), subtitleLanguage.getSelectedItemPosition() };
-        boolean readAccountLanguages = api != null && draft == null;
-        java.util.concurrent.atomic.AtomicBoolean languagesReady = new java.util.concurrent.atomic.AtomicBoolean(
-                !readAccountLanguages && (draft != null ? draftSaveLanguages : settings == null));
-        TextView languageNotice = text(view, "语言偏好保存到当前 Jellyfin 账号，对同账号其他客户端也生效。");
-        if (!languagesReady.get()) {
-            audioLanguage.setEnabled(false);
-            subtitleLanguage.setEnabled(false);
+        Runnable back = api == null ? null : browseTab == BrowseTab.LIBRARY ? this::librariesPage : this::homePage;
+        LinearLayout view = api == null ? panel("订阅设置", true, null)
+                : panel("订阅设置", true, back, BrowseTab.SETTINGS);
+        section(view, "家庭影音订阅");
+        SubscriptionSettings active = subscriptionController == null ? null : subscriptionController.state();
+        EditText link = settingsField(view, "订阅链接", "", false);
+        link.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
+        link.setHint(active == null ? "粘贴 HTTPS 订阅链接" : "已配置；填写新链接以更换");
+        subscriptionStatus = text(view, message.isEmpty() ? subscriptionMessage.isEmpty()
+                ? active == null ? "首次填写链接后，自动获取代理、授权和画质。" : "已配置订阅 v" + active.configuration.revision
+                : subscriptionMessage : message);
+        subscriptionStatus.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+        if (active != null) {
+            text(view, "配置来源：" + SubscriptionClient.Link.parse(active.link).url.host());
+            text(view, "上次同步：" + android.text.format.DateFormat.format("yyyy-MM-dd HH:mm", active.checkedAt));
+            ConnectionSettings managed = active.configuration.settings(settings);
+            managedQuality = text(view, "画质由服务端管理："
+                    + PlaybackPolicy.RESOLUTION_LABELS[PlaybackPolicy.optionIndex(PlaybackPolicy.WIDTHS, managed.resolution, 1920)]
+                    + " / " + PlaybackPolicy.RATE_LABELS[PlaybackPolicy.optionIndex(PlaybackPolicy.RATES, managed.bitrate, 4_000_000)]);
         }
-        if (readAccountLanguages) {
-            languageNotice.setText("正在读取账号语言偏好…");
-            int expected = page;
-            JellyfinApi connection = api;
-            browse.execute(() -> {
-                try {
-                    String[] preferences = connection.languagePreferences();
-                    onPage(expected, () -> {
-                        for (int i = 0; i < 2; i++) {
-                            accountLanguages[i] = preferences[i];
-                        }
-                        languageCodes[0] = languageOptions(audioLanguage, preferences[0]);
-                        languageCodes[1] = languageOptions(subtitleLanguage, preferences[1]);
-                        accountSelections[0] = audioLanguage.getSelectedItemPosition();
-                        accountSelections[1] = subtitleLanguage.getSelectedItemPosition();
-                        audioLanguage.setSelection(accountSelections[0]);
-                        subtitleLanguage.setSelection(accountSelections[1]);
-                        audioLanguage.setEnabled(true);
-                        subtitleLanguage.setEnabled(true);
-                        languagesReady.set(true);
-                        languageNotice.setText("语言偏好保存到当前 Jellyfin 账号，对同账号其他客户端也生效。");
-                    });
-                } catch (Exception error) {
-                    onPage(expected, () -> languageNotice.setText("未能读取账号语言偏好。重新进入设置可重试，本次保存只更新连接和画质。"));
-                }
-            });
-        } else if (!languagesReady.get()) {
-            languageNotice.setText("连接成功后重新进入设置读取账号语言偏好，本次保存只更新连接和画质。");
-        }
-        TextView notice = text(view, message);
-        notice.setVisibility(message.isEmpty() ? View.GONE : View.VISIBLE);
         actionButton(view, "保存并连接", true, () -> {
-            try {
-                ConnectionSettings candidate = new ConnectionSettings(value(server), value(host), Integer.parseInt(value(port)),
-                        value(proxyUser), value(proxyPassword), value(username), value(password),
-                        PlaybackPolicy.WIDTHS[resolution.getSelectedItemPosition()], PlaybackPolicy.RATES[bitrate.getSelectedItemPosition()],
-                        audioLanguage.getSelectedItemPosition() == accountSelections[0] ? accountLanguages[0] : languageCodes[0][audioLanguage.getSelectedItemPosition()],
-                        subtitleLanguage.getSelectedItemPosition() == accountSelections[1] ? accountLanguages[1] : languageCodes[1][subtitleLanguage.getSelectedItemPosition()]);
-                if (settings == null) connect(candidate, true, 0, languagesReady.get());
-                else confirmSettings(candidate, languagesReady.get());
-            } catch (IllegalArgumentException error) {
-                notice.setText("请检查服务器地址、代理端口和账号。");
-                notice.setVisibility(View.VISIBLE);
-            }
+            String proposed = value(link);
+            try { SubscriptionClient.Link.parse(proposed); }
+            catch (Exception error) { subscriptionStatus.setText("请填写完整有效的 HTTPS 订阅链接"); return; }
+            confirmSubscription(() -> {
+                if (subscriptionController == null) { subscriptionStatus.setText("订阅存储不可用，请重开 App 后重试"); return; }
+                pendingSubscription = null;
+                subscriptionController.importLink(proposed);
+            });
         });
+        if (active != null) {
+            actionButton(view, "立即同步", false, () -> subscriptionController.sync(true));
+            actionButton(view, "清除订阅", false, () -> confirmSubscription(() -> {
+                try {
+                    pendingSubscription = null;
+                    if (!getSharedPreferences("connection", 0).edit().clear().commit())
+                        throw new IllegalStateException("无法清除旧配置");
+                    subscriptionController.clear();
+                    stopPlayback(); api = null; settings = null;
+                    browseMemory.clear(); savedCatalog = null; localProgress.clear();
+                    libraryUi.useConnection(null);
+                    subscriptionMessage = "订阅已清除，请重新填写链接";
+                    settingsPage(subscriptionMessage);
+                } catch (Exception error) { subscriptionStatus.setText("清除失败，请重试"); }
+            }));
+        }
+        if (api != null) subscriptionLanguages(view);
+        text(view, "更换或清除订阅需要确认密码；普通同步不会修改音轨或字幕偏好。");
+    }
+
+    private void subscriptionLanguages(LinearLayout view) {
+        settingsSection(view, "播放语言");
+        JellyfinApi connection = api;
+        int expected = page;
+        Spinner audio = qualityField(view, "首选的音频语言", LanguagePreferences.LABELS,
+                LanguagePreferences.optionIndex(settings == null ? LanguagePreferences.DEFAULT : settings.audioLanguage));
+        Spinner subtitles = qualityField(view, "字幕语言偏好", LanguagePreferences.LABELS,
+                LanguagePreferences.optionIndex(settings == null ? LanguagePreferences.DEFAULT : settings.subtitleLanguage));
+        audio.setEnabled(false); subtitles.setEnabled(false);
+        boolean[] ready = {false};
+        TextView status = text(view, "正在读取 Jellyfin 账号偏好…");
+        worker.execute(() -> {
+            try {
+                String[] preferences = connection.languagePreferences();
+                onPage(expected, () -> {
+                    if (api != connection) return;
+                    audio.setSelection(LanguagePreferences.optionIndex(preferences[0]));
+                    subtitles.setSelection(LanguagePreferences.optionIndex(preferences[1]));
+                    audio.setEnabled(true); subtitles.setEnabled(true); ready[0] = true;
+                    status.setText("偏好保存在当前 Jellyfin 账号，Hub 不覆盖此设置。");
+                });
+            } catch (Exception ignored) { onPage(expected, () -> status.setText("暂时无法读取语言偏好，请稍后重新进入设置。")); }
+        });
+        actionButton(view, "保存语言偏好", false, () -> {
+            if (!ready[0] || api != connection) return;
+            confirmSubscription(() -> {
+                String first = LanguagePreferences.CODES[audio.getSelectedItemPosition()];
+                String second = LanguagePreferences.CODES[subtitles.getSelectedItemPosition()];
+                worker.execute(() -> {
+                    try {
+                        connection.saveLanguagePreferences(first, second);
+                        onPage(expected, () -> { if (api == connection) status.setText("语言偏好已保存"); });
+                    } catch (Exception ignored) { onPage(expected, () -> status.setText("保存失败，请稍后重试")); }
+                });
+            });
+        });
+    }
+
+    private void confirmSubscription(Runnable accepted) {
+        LinearLayout body = column(); body.setPadding(dp(20), dp(18), dp(20), dp(18));
+        body.setBackground(libraryUi.rounded(LibraryUi.PANEL, LibraryUi.RADIUS_PANEL));
+        text(body, "输入确认密码"); EditText password = settingsField(body, "确认密码", "", true);
+        TextView error = text(body, "");
+        AlertDialog dialog = new AlertDialog.Builder(this).setView(body).create();
+        actionRow(body, "取消", dialog::dismiss, "确认", () -> {
+            if (!SETTINGS_CONFIRMATION.equals(value(password))) { error.setText("确认密码错误，请重新输入"); return; }
+            dialog.dismiss(); hideKeyboard(password); accepted.run();
+        });
+        dialog.show();
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
+            dialog.getWindow().setLayout(Math.min(dp(340), getResources().getDisplayMetrics().widthPixels - dp(36)), -2);
+        }
+        password.requestFocus();
+    }
+
+    private void applySubscription(SubscriptionController.Prepared prepared) {
+        if (closing || subscriptionController == null || !subscriptionController.isCurrent(prepared)) return;
+        ConnectionSettings next = prepared.state.configuration.settings(settings);
+        boolean changed = !ManagedConfiguration.sameConnection(settings, next);
+        if (changed && playback != null) {
+            pendingSubscription = prepared; subscriptionController.pending(prepared); return;
+        }
+        try {
+            subscriptionController.activate(prepared);
+            settings = next; pendingSubscription = null;
+            if (!changed && api != null) return;
+            if (prepared.api == null) { connect(next); return; }
+            rememberBrowsePosition(); browseMemory.clear(); savedCatalog = null; localProgress.clear(); homeDirty = false;
+            api = prepared.api; libraryUi.useConnection(api); homePage();
+        } catch (Exception ignored) {
+            subscriptionMessage = "订阅应用失败，原有配置已保留";
+            if (subscriptionStatus != null && subscriptionStatus.isAttachedToWindow()) subscriptionStatus.setText(subscriptionMessage);
+        }
+    }
+
+    private void showBlockedSubscription() {
+        if (closing || playback != null) return;
+        api = null; settings = null;
+        rememberBrowsePosition(); browseMemory.clear(); savedCatalog = null; localProgress.clear();
+        libraryUi.useConnection(null);
+        settingsPage(subscriptionMessage);
     }
 
     private void settingsSection(LinearLayout view, String title) {
@@ -442,50 +524,6 @@ public final class MainActivity extends Activity {
         return codes;
     }
 
-    private void confirmSettings(ConnectionSettings candidate, boolean saveLanguages) {
-        LinearLayout body = column();
-        body.setPadding(dp(21), dp(21), dp(21), dp(21));
-        GradientDrawable backdrop = libraryUi.rounded(LibraryUi.PANEL, LibraryUi.RADIUS_PANEL);
-        backdrop.setStroke(dp(1), 0xff454545);
-        body.setBackground(backdrop);
-        body.addView(libraryUi.label("确认保存设置", 26, LibraryUi.TEXT, true));
-        EditText confirmation = settingsField(body, "确认密码", "", true);
-        confirmation.setBackgroundTintList(null);
-        confirmation.setBackground(inputOutline());
-        confirmation.setPadding(dp(11), dp(8), dp(11), dp(8));
-        TextView error = text(body, "");
-        error.setTextColor(LibraryUi.ERROR);
-        error.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
-        error.setVisibility(View.GONE);
-        AlertDialog dialog = new AlertDialog.Builder(this).setView(body).create();
-        Runnable submit = () -> {
-            if (!SETTINGS_CONFIRMATION.equals(value(confirmation))) {
-                error.setText(value(confirmation).isEmpty() ? "请输入确认密码。" : "确认密码错误，请重新输入。");
-                error.setVisibility(View.VISIBLE);
-                confirmation.setActivated(true);
-                confirmation.requestFocus();
-                return;
-            }
-            dialog.dismiss();
-            connect(candidate, true, 0, saveLanguages);
-        };
-        actionRow(body, "取消", dialog::dismiss, "确认保存", submit);
-        confirmation.setImeOptions(EditorInfo.IME_ACTION_DONE);
-        confirmation.setOnEditorActionListener((view, action, event) -> {
-            if (action != EditorInfo.IME_ACTION_DONE) return false;
-            submit.run();
-            return true;
-        });
-        confirmation.requestFocus();
-        dialog.show();
-        if (dialog.getWindow() != null) {
-            dialog.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
-            dialog.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE
-                    | WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
-            dialog.getWindow().setLayout(Math.min(dp(340), getResources().getDisplayMetrics().widthPixels - dp(36)), -2);
-        }
-    }
-
     private StateListDrawable inputOutline() {
         StateListDrawable background = new StateListDrawable();
         int[] states = { android.R.attr.state_activated, android.R.attr.state_focused };
@@ -498,15 +536,11 @@ public final class MainActivity extends Activity {
         return background;
     }
 
-    private void connect(ConnectionSettings candidate, boolean save) {
-        connect(candidate, save, 0);
+    private void connect(ConnectionSettings candidate) {
+        connect(candidate, 0);
     }
 
-    private void connect(ConnectionSettings candidate, boolean save, long splashReadyAt) {
-        connect(candidate, save, splashReadyAt, save);
-    }
-
-    private void connect(ConnectionSettings candidate, boolean save, long splashReadyAt, boolean saveLanguages) {
+    private void connect(ConnectionSettings candidate, long splashReadyAt) {
         if (splashReadyAt == 0) {
             LinearLayout view = panel("正在连接 Jellyfin", false, () -> settingsPage(""));
             text(view, "通过家庭 HTTP 代理连接。");
@@ -517,21 +551,21 @@ public final class MainActivity extends Activity {
             try {
                 JellyfinApi connected = new JellyfinApi(candidate, device);
                 connected.login();
-                if (save && saveLanguages) connected.saveLanguagePreferences(candidate.audioLanguage, candidate.subtitleLanguage);
-                if (save) candidate.save(this);
                 afterSplash(expected, splashReadyAt, () -> {
                     settings = candidate;
-                    draft = null;
+
+                    rememberBrowsePosition();
+                    browseMemory.clear();
+                    savedCatalog = null;
+                    localProgress.clear();
+                    homeDirty = false;
                     api = connected;
                     libraryUi.useConnection(connected);
                     homePage();
-                    if (save) Toast.makeText(this, "设置已保存，连接成功", Toast.LENGTH_SHORT).show();
                 });
             } catch (Exception error) {
                 afterSplash(expected, splashReadyAt, () -> {
-                    draft = candidate;
-                    draftSaveLanguages = saveLanguages;
-                    connectionFailed(candidate, save, saveLanguages, error);
+                    connectionFailed(candidate, error);
                 });
             }
         });
@@ -543,14 +577,82 @@ public final class MainActivity extends Activity {
         }, Math.max(SystemClock.uptimeMillis(), readyAt));
     }
 
-    private void connectionFailed(ConnectionSettings candidate, boolean save, boolean saveLanguages, Exception error) {
+    private void connectionFailed(ConnectionSettings candidate, Exception error) {
         LinearLayout view = panel("连接失败", false, () -> settingsPage(""));
         text(view, message(error, "连接失败"));
-        button(view, "重试连接", () -> connect(candidate, save, 0, saveLanguages));
+        button(view, "重试连接", () -> connect(candidate));
         button(view, "连接设置", () -> settingsPage(""));
     }
 
     private boolean homePlayLoading;
+
+    private void rememberBrowsePosition() {
+        if (rememberedScroll != null) {
+            if (rememberedKey != null) browseMemory.position(rememberedKey, rememberedScroll.getScrollY());
+            if (rememberedLibrary != null) rememberedLibrary.scrollY = rememberedScroll.getScrollY();
+        }
+        rememberedScroll = null;
+        rememberedKey = null;
+        rememberedLibrary = null;
+    }
+
+    private void trackBrowsePosition(LinearLayout view, String key) {
+        rememberedScroll = (ScrollView) view.getParent();
+        rememberedKey = key;
+    }
+
+    private void restoreBrowsePosition() {
+        ScrollView scroll = rememberedScroll;
+        String key = rememberedKey;
+        int expected = page;
+        if (scroll != null && key != null) scroll.post(() -> {
+            if (page == expected) scroll.scrollTo(0, browseMemory.position(key));
+        });
+    }
+
+    private JellyfinApi.Item withLocalProgress(JellyfinApi.Item item) {
+        LocalProgress progress = localProgress.get(item.id);
+        if (progress != null) {
+            item.resumeMs = progress.ended ? 0 : progress.position;
+            item.played = progress.ended;
+        }
+        return item;
+    }
+
+    private void rememberPlaybackProgress() {
+        if (playback == null || player == null || !playbackStarted) return;
+        // During a failed replacement startup, item can still name the previous episode.
+        if (stream == null || !stream.itemId.equals(playback.item.id)) return;
+        long position = player.getCurrentPosition();
+        boolean ended = player.getPlaybackState() == Player.STATE_ENDED;
+        LocalProgress progress = new LocalProgress(playback.item, position, ended);
+        localProgress.remove(playback.item.id);
+        localProgress.put(playback.item.id, progress);
+        while (localProgress.size() > 64) localProgress.remove(localProgress.keySet().iterator().next());
+        withLocalProgress(playback.item);
+        if (!playback.item.seriesId.isEmpty()) {
+            String key = "target:" + playback.item.seriesId;
+            if (ended) browseMemory.remove(key);
+            else browseMemory.put(key, playback.item, SystemClock.uptimeMillis());
+        }
+        homeDirty = true;
+    }
+
+    private HomeFeed.Result<JellyfinApi.Item> localHome(HomeFeed.Result<JellyfinApi.Item> cached) {
+        List<JellyfinApi.Item> items = new ArrayList<>();
+        for (JellyfinApi.Item item : cached.items) {
+            withLocalProgress(item);
+            if (!cached.resume || item.resumeMs > 0 && !item.played) items.add(item);
+        }
+        for (LocalProgress progress : localProgress.values()) {
+            if (progress.ended || progress.position <= 0) continue;
+            if (!cached.resume) items.clear();
+            items.removeIf(item -> item.id.equals(progress.item.id));
+            items.add(0, withLocalProgress(progress.item));
+            cached = new HomeFeed.Result<>(true, items);
+        }
+        return new HomeFeed.Result<>(cached.resume, items);
+    }
 
     private void homePage() {
         homePlayLoading = false;
@@ -558,7 +660,15 @@ public final class MainActivity extends Activity {
         browseTab = BrowseTab.HOME;
         LinearLayout view = panel(getString(R.string.app_name), true, null, browseTab);
         view.setPadding(contentGutter(), dp(22), contentGutter(), dp(32));
-        new HomeListing(view).load(false);
+        trackBrowsePosition(view, "home");
+        HomeListing listing = new HomeListing(view);
+        HomeFeed.Result<JellyfinApi.Item> cached = browseMemory.get("home");
+        if (cached != null) {
+            listing.render(localHome(cached));
+            listing.loaded = true;
+            restoreBrowsePosition();
+            if (homeDirty || browseMemory.stale("home", SystemClock.uptimeMillis(), 120_000)) listing.load(false);
+        } else listing.load(false);
     }
 
     private final class HomeListing {
@@ -567,6 +677,7 @@ public final class MainActivity extends Activity {
         private final SwipeRefreshLayout refresh;
         private final int expected = page;
         private boolean loading, loaded;
+        private String renderedContent = "";
         private final LoadingUi.RefreshNotice notice;
 
         HomeListing(LinearLayout view) {
@@ -598,7 +709,8 @@ public final class MainActivity extends Activity {
                     () -> page == expected && loading) : null;
             if (requestedRefresh) { refresh.setRefreshing(true); notice.start(); }
             JellyfinApi connection = api;
-            browse.execute(() -> {
+            // Queue after playback's Stopped report so an old server position cannot win the race.
+            worker.execute(() -> {
                 try {
                     HomeFeed.Result<JellyfinApi.Item> result = HomeFeed.load(new HomeFeed.Source<JellyfinApi.Item>() {
                         @Override public List<JellyfinApi.Item> resume() throws Exception {
@@ -616,22 +728,18 @@ public final class MainActivity extends Activity {
                     });
                     onPage(expected, () -> {
                         if (pending != null) pending.finish();
-                        view.removeAllViews();
-                        TextView heading = libraryUi.label(result.resume ? "继续观看" : "最近添加", 26, LibraryUi.TEXT, true);
-                        heading.setPadding(0, 0, 0, dp(16));
-                        view.addView(heading);
-                        if (result.items.isEmpty()) {
-                            LoadingUi.empty(view, libraryUi, "暂无可播放的影片", "续播记录和最近添加均为空。");
-                        } else {
-                            view.addView(libraryUi.homeList(result.items, result.resume, screenWidth(),
-                                    item -> openHomeDetails(item), item -> playHomeItem(item)));
-                        }
+                        int oldY = scroll.getScrollY();
+                        // Only a successful Stopped report allows the server result to replace our local progress.
+                        localProgress.values().removeIf(progress -> progress.reported);
+                        browseMemory.put("home", result, SystemClock.uptimeMillis());
+                        homeDirty = false;
+                        render(localHome(result));
                         loaded = true;
                         loading = false;
                         refresh.setRefreshing(false);
                         notice.clear();
                         if (first) LoadingUi.ready(view);
-                        scroll.scrollTo(0, 0);
+                        scroll.post(() -> { if (page == expected) scroll.scrollTo(0, requestedRefresh ? 0 : oldY); });
                         Log.i(JellyfinApi.TAG, "Home section=" + (result.resume ? "RESUME" : "LATEST")
                                 + " items=" + result.items.size() + " refresh=" + requestedRefresh);
                     });
@@ -640,11 +748,27 @@ public final class MainActivity extends Activity {
                         loading = false;
                         refresh.setRefreshing(false);
                         if (pending != null) pending.finish();
-                        if (loaded) notice.failed(message(error, "请检查网络后重试。"));
+                        if (loaded && requestedRefresh) notice.failed(message(error, "请检查网络后重试。"));
+                        else if (loaded) Toast.makeText(MainActivity.this, "同步失败，保留已有内容", Toast.LENGTH_SHORT).show();
                         else LoadingUi.failure(view, libraryUi, message(error, "读取首页失败"), () -> load(false), false);
                     });
                 }
             });
+        }
+
+        void render(HomeFeed.Result<JellyfinApi.Item> result) {
+            StringBuilder content = new StringBuilder(Boolean.toString(result.resume));
+            for (JellyfinApi.Item item : result.items) content.append('|').append(item.id).append(':')
+                    .append(item.resumeMs).append(':').append(item.played).append(':').append(item.title);
+            if (renderedContent.equals(content.toString())) return;
+            renderedContent = content.toString();
+            view.removeAllViews();
+            TextView heading = libraryUi.label(result.resume ? "继续观看" : "最近添加", 26, LibraryUi.TEXT, true);
+            heading.setPadding(0, 0, 0, dp(16));
+            view.addView(heading);
+            if (result.items.isEmpty()) LoadingUi.empty(view, libraryUi, "暂无可播放的影片", "续播记录和最近添加均为空。");
+            else view.addView(libraryUi.homeList(result.items, result.resume, screenWidth(),
+                    item -> openHomeDetails(item), item -> playHomeItem(item)));
         }
     }
 
@@ -657,6 +781,7 @@ public final class MainActivity extends Activity {
     }
 
     private void playHomeItem(JellyfinApi.Item item) {
+        if (subscriptionController != null && subscriptionController.blocked()) { showBlockedSubscription(); return; }
         if (!item.series) {
             playbackPage(item, item.resumeMs, this::homePage);
             return;
@@ -693,7 +818,7 @@ public final class MainActivity extends Activity {
     }
 
     private void librariesPage() {
-        librariesPage(null);
+        librariesPage(savedCatalog);
     }
 
     private void librariesPage(LibraryCatalog catalog) {
@@ -714,10 +839,13 @@ public final class MainActivity extends Activity {
                         loaded.tabs.add(new LibraryLocation(item, true));
                     }
                 }
-                onPage(expected, () -> {
+                ui.post(() -> {
+                    if (api != connection) return;
+                    if (savedCatalog == null) savedCatalog = loaded;
+                    if (page != expected) return;
                     if (pending.wasShown()) view.setTag(R.id.loading_handoff, true);
                     pending.finish();
-                    showCatalog(view, loaded);
+                    showCatalog(view, savedCatalog);
                 });
             } catch (Exception error) {
                 onPage(expected, () -> {
@@ -734,6 +862,19 @@ public final class MainActivity extends Activity {
             return;
         }
         if (catalog.selected == null) catalog.selected = catalog.tabs.get(0);
+        catalog.selected.lastAccess = SystemClock.uptimeMillis();
+        // Keep the current listing intact; bound only inactive tab data.
+        List<LibraryLocation> inactive = new ArrayList<>(catalog.tabs);
+        inactive.remove(catalog.selected);
+        Collections.sort(inactive, (left, right) -> Long.compare(left.lastAccess, right.lastAccess));
+        int retained = 0;
+        for (LibraryLocation location : inactive) retained += location.items.size();
+        for (int i = 0; i < inactive.size(); i++) {
+            LibraryLocation location = inactive.get(i);
+            if (retained <= 1500 && inactive.size() - i <= 3) break;
+            retained -= location.items.size();
+            location.items.clear(); location.loaded = false; location.more = true;
+        }
         ScrollView content = (ScrollView) view.getParent();
         LinearLayout root = (LinearLayout) content.getParent();
         HorizontalScrollView tabs = new HorizontalScrollView(this);
@@ -774,6 +915,7 @@ public final class MainActivity extends Activity {
         JellyfinApi.Item details;
         final List<JellyfinApi.Item> items = new ArrayList<>();
         int scrollY;
+        long lastAccess;
         boolean loaded;
         boolean more = true;
         LibraryLocation(JellyfinApi.Item folder, boolean catalog) {
@@ -869,6 +1011,8 @@ public final class MainActivity extends Activity {
         }
 
         void show() {
+            rememberedScroll = scroll;
+            rememberedLibrary = location;
             view.addView(grid);
             view.addView(footer);
             scroll.setOnScrollChangeListener((target, x, y, oldX, oldY) -> {
@@ -896,6 +1040,7 @@ public final class MainActivity extends Activity {
         }
 
         private void appendItems(int offset) {
+            for (JellyfinApi.Item item : location.items) withLocalProgress(item);
             if (collectionGrid == null) libraryUi.appendGrid(grid, location.items, gridWidth, offset, this::open);
             else collectionGrid.append(location.items, offset, scroll);
             footer.removeAllViews();
@@ -984,16 +1129,41 @@ public final class MainActivity extends Activity {
         LinearLayout view = panel("媒体详情", true, back, browseTab);
         int expected = page;
         view.setPadding(0, 0, 0, dp(24));
+        String id = "Episode".equals(initial.type) ? initial.seriesId : initial.id;
+        String key = "detail:" + id;
+        String restoredSeason = seasonId == null ? browseMemory.get("selectedSeason:" + id) : seasonId;
+        trackBrowsePosition(view, key);
+        JellyfinApi.Item cached = browseMemory.get(key);
+        if (cached != null) {
+            showDetails(view, withLocalProgress(cached), back, restoredSeason);
+            restoreBrowsePosition();
+            if (browseMemory.stale(key, SystemClock.uptimeMillis(), 600_000)) {
+                JellyfinApi connection = api;
+                worker.execute(() -> {
+                    try {
+                        JellyfinApi.Item updated = connection.details(id);
+                        ui.post(() -> {
+                            if (api == connection) browseMemory.put(key, withLocalProgress(updated), SystemClock.uptimeMillis());
+                        });
+                    } catch (Exception ignored) { /* Keep readable cached details on failure. */ }
+                });
+            }
+            return;
+        }
         String title = "Episode".equals(initial.type) ? initial.seriesName : initial.title;
         LoadingUi.Pending pending = new LoadingUi.Pending(view, libraryUi, ui, LoadingUi.Kind.DETAIL, title, () -> page == expected);
         JellyfinApi connection = api;
         worker.execute(() -> {
             try {
                 JellyfinApi.Item item = connection.details("Episode".equals(initial.type) ? initial.seriesId : initial.id);
-                onPage(expected, () -> {
+                ui.post(() -> {
+                    if (api != connection) return;
+                    browseMemory.put(key, item, SystemClock.uptimeMillis());
+                    if (page != expected) return;
                     pending.finish();
-                    showDetails(view, item, back, seasonId);
+                    showDetails(view, withLocalProgress(item), back, restoredSeason);
                     LoadingUi.ready(view);
+                    restoreBrowsePosition();
                 });
             } catch (Exception error) {
                 onPage(expected, () -> {
@@ -1006,9 +1176,9 @@ public final class MainActivity extends Activity {
 
     private void showDetails(LinearLayout pageView, JellyfinApi.Item item, Runnable back, String seasonId) {
         pageView.setPadding(0, 0, 0, dp(24));
-        int screenDp = getResources().getConfiguration().screenWidthDp;
+        int screenDp = Math.round(browsingWidthPixels / getResources().getDisplayMetrics().density);
         int coverHeight = Math.max(185, Math.min(228,
-                Math.round(getResources().getConfiguration().screenHeightDp * 0.27f)));
+                Math.round(browsingHeightDp * 0.27f)));
         int posterWidth = Math.max(94, Math.min(114, Math.round(screenDp * 0.27f)));
         int posterHeight = posterWidth * 3 / 2;
         int overlap = Math.round(posterWidth * 0.88f);
@@ -1275,12 +1445,26 @@ public final class MainActivity extends Activity {
         picker.addView(seasons);
         int expected = page;
         JellyfinApi connection = api;
-        browse.execute(() -> {
+        String targetKey = "target:" + series.id;
+        JellyfinApi.Item cachedTarget = browseMemory.get(targetKey);
+        if (cachedTarget != null) {
+            detailPlaybackActions(playbackActions, withLocalProgress(cachedTarget),
+                    () -> detailsPage(series, back, (String) seasons.getTag()));
+        } else
+        worker.execute(() -> {
             try {
-                JellyfinApi.Item chosen = connection.seriesPlaybackTarget(series);
+                List<JellyfinApi.Item> candidates = connection.episodes(series, null);
                 onPage(expected, () -> {
+                    JellyfinApi.Item chosen = null;
+                    for (JellyfinApi.Item candidate : candidates) {
+                        withLocalProgress(candidate);
+                        if (candidate.resumeMs > 0) { chosen = candidate; break; }
+                        if (chosen == null && !candidate.played) chosen = candidate;
+                    }
+                    if (chosen == null && !candidates.isEmpty()) chosen = candidates.get(0);
                     if (chosen == null) return;
-                    detailPlaybackActions(playbackActions, chosen,
+                    browseMemory.put(targetKey, chosen, SystemClock.uptimeMillis());
+                    detailPlaybackActions(playbackActions, withLocalProgress(chosen),
                             () -> detailsPage(series, back, (String) seasons.getTag()));
                 });
             } catch (Exception error) {
@@ -1292,41 +1476,21 @@ public final class MainActivity extends Activity {
 
     private void fillSeasons(LinearLayout picker, JellyfinApi.Item series, Runnable back, String selectedId) {
         int expected = page;
+        String key = "seasons:" + series.id;
+        List<JellyfinApi.Item> cached = browseMemory.get(key);
+        if (cached != null) { renderSeasons(picker, series, back, selectedId, cached, false); return; }
         LoadingUi.Pending pending = new LoadingUi.Pending(picker, libraryUi, ui, LoadingUi.Kind.EPISODES, null, () -> page == expected);
         JellyfinApi connection = api;
         browse.execute(() -> {
             try {
                 List<JellyfinApi.Item> seasons = connection.seasons(series);
-                onPage(expected, () -> {
+                ui.post(() -> {
+                    if (api != connection) return;
+                    browseMemory.put(key, seasons, SystemClock.uptimeMillis());
+                    if (page != expected) return;
                     boolean handoff = pending.wasShown();
                     pending.finish();
-                    LinearLayout list = column();
-                    if (handoff) list.setTag(R.id.loading_handoff, true);
-                    JellyfinApi.Item selected = null;
-                    for (JellyfinApi.Item season : seasons) {
-                        if (selected == null || season.id.equals(selectedId)) selected = season;
-                    }
-                    picker.setTag(selected == null ? null : selected.id);
-                    if (seasons.size() > 1) {
-                        HorizontalScrollView scroll = new HorizontalScrollView(this);
-                        scroll.setHorizontalScrollBarEnabled(false);
-                        LinearLayout row = new LinearLayout(this);
-                        scroll.addView(row);
-                        picker.addView(scroll);
-                        for (JellyfinApi.Item season : seasons) {
-                            TextView tab = addChip(row, season.title);
-                            selectChip(tab, season == selected);
-                            libraryUi.actionable(tab, () -> {
-                                if (tab.isSelected()) return;
-                                selectChipInRow(row, tab);
-                                picker.setTag(season.id);
-                                fillEpisodes(list, series, season, back);
-                            });
-                            if (season == selected) scroll.post(() -> scroll.smoothScrollTo(tab.getLeft(), 0));
-                        }
-                    }
-                    picker.addView(list);
-                    fillEpisodes(list, series, selected, back);
+                    renderSeasons(picker, series, back, selectedId, seasons, handoff);
                 });
             } catch (Exception error) {
                 onPage(expected, () -> {
@@ -1338,6 +1502,39 @@ public final class MainActivity extends Activity {
                 });
             }
         });
+    }
+
+    private void renderSeasons(LinearLayout picker, JellyfinApi.Item series, Runnable back, String selectedId,
+                               List<JellyfinApi.Item> seasons, boolean handoff) {
+        LinearLayout list = column();
+        if (handoff) list.setTag(R.id.loading_handoff, true);
+        JellyfinApi.Item selected = null;
+        for (JellyfinApi.Item season : seasons) if (selected == null || season.id.equals(selectedId)) selected = season;
+        picker.setTag(selected == null ? null : selected.id);
+        if (selected != null) browseMemory.put("selectedSeason:" + series.id, selected.id, SystemClock.uptimeMillis());
+        if (seasons.size() > 1) {
+            HorizontalScrollView scroll = new HorizontalScrollView(this);
+            scroll.setHorizontalScrollBarEnabled(false);
+            LinearLayout row = new LinearLayout(this);
+            scroll.addView(row);
+            picker.addView(scroll);
+            for (JellyfinApi.Item season : seasons) {
+                TextView tab = addChip(row, season.title);
+                selectChip(tab, season == selected);
+                libraryUi.actionable(tab, () -> {
+                    if (tab.isSelected()) return;
+                    selectChipInRow(row, tab);
+                    picker.setTag(season.id);
+                    browseMemory.put("selectedSeason:" + series.id, season.id, SystemClock.uptimeMillis());
+                    // A new season starts at its heading; restoring a previous page must not override it.
+                    browseMemory.position("detail:" + series.id, rememberedScroll == null ? 0 : rememberedScroll.getScrollY());
+                    fillEpisodes(list, series, season, back);
+                });
+                if (season == selected) scroll.post(() -> scroll.smoothScrollTo(tab.getLeft(), 0));
+            }
+        }
+        picker.addView(list);
+        fillEpisodes(list, series, selected, back);
     }
 
     private TextView addLibraryTab(LinearLayout row, String title, boolean selected) {
@@ -1395,21 +1592,22 @@ public final class MainActivity extends Activity {
     private void fillEpisodes(LinearLayout list, JellyfinApi.Item series, JellyfinApi.Item season, Runnable back) {
         list.removeAllViews();
         int expected = page, request = ++seasonRequest;
+        String key = "episodes:" + series.id + ":" + (season == null ? "" : season.id);
+        List<JellyfinApi.Item> cached = browseMemory.get(key);
+        if (cached != null) { renderEpisodes(list, series, season, back, cached); return; }
         LoadingUi.Pending pending = new LoadingUi.Pending(list, libraryUi, ui, LoadingUi.Kind.EPISODES, null,
                 () -> page == expected && request == seasonRequest);
         JellyfinApi connection = api;
         browse.execute(() -> {
             try {
                 List<JellyfinApi.Item> episodes = connection.episodes(series, season);
-                onPage(expected, () -> {
+                ui.post(() -> {
+                    if (api != connection) return;
+                    browseMemory.put(key, episodes, SystemClock.uptimeMillis());
+                    if (page != expected) return;
                     if (request != seasonRequest) return;
                     pending.finish();
-                    if (episodes.isEmpty()) LoadingUi.empty(list, libraryUi, "本季暂无可播放单集", "暂无可用的播放内容。");
-                    LoadingUi.ready(list);
-                    for (JellyfinApi.Item episode : episodes) {
-                        episodeRow(list, episode, () -> openItem(episode,
-                                () -> detailsPage(series, back, season == null ? null : season.id)));
-                    }
+                    renderEpisodes(list, series, season, back, episodes);
                 });
             } catch (Exception error) {
                 onPage(expected, () -> {
@@ -1419,6 +1617,17 @@ public final class MainActivity extends Activity {
                 });
             }
         });
+    }
+
+    private void renderEpisodes(LinearLayout list, JellyfinApi.Item series, JellyfinApi.Item season,
+                                Runnable back, List<JellyfinApi.Item> episodes) {
+        if (episodes.isEmpty()) LoadingUi.empty(list, libraryUi, "本季暂无可播放单集", "暂无可用的播放内容。");
+        for (JellyfinApi.Item episode : episodes) {
+            withLocalProgress(episode);
+            episodeRow(list, episode, () -> openItem(episode,
+                    () -> detailsPage(series, back, season == null ? null : season.id)));
+        }
+        restoreBrowsePosition();
     }
 
     private void episodeRow(LinearLayout list, JellyfinApi.Item episode, Runnable open) {
@@ -1457,6 +1666,8 @@ public final class MainActivity extends Activity {
     }
 
     private void playbackPage(JellyfinApi.Item item, Long startPosition, Runnable back) {
+        if (subscriptionController != null && subscriptionController.blocked()) { showBlockedSubscription(); return; }
+        rememberBrowsePosition();
         Runnable close = () -> {
             stopPlayback();
             back.run();
@@ -1477,7 +1688,8 @@ public final class MainActivity extends Activity {
 
     private final class PlaybackPage {
         final JellyfinApi connection = api;
-        final PlaybackPolicy policy;
+        PlaybackPolicy policy;
+        String qualityText;
         final FullscreenPlaybackView screen;
         JellyfinApi.Item item, previous, next;
         PlaybackChange change;
@@ -1503,13 +1715,19 @@ public final class MainActivity extends Activity {
                     PlaybackPolicy.WIDTHS, settings.resolution, PlaybackPolicy.WIDTH)];
             String bitrate = PlaybackPolicy.RATE_LABELS[PlaybackPolicy.optionIndex(
                     PlaybackPolicy.RATES, settings.bitrate, PlaybackPolicy.TOTAL_BPS)];
-            screen = new FullscreenPlaybackView(MainActivity.this, libraryUi, resolution + " · " + bitrate, close,
+            qualityText = resolution + " · " + bitrate;
+            screen = new FullscreenPlaybackView(MainActivity.this, libraryUi, qualityText, close,
                     () -> changeEpisode(previous), () -> changeEpisode(next), this::chooseSubtitle, this::chooseAudio);
             updateTitle();
             updateActions();
         }
 
         void requestInitial(long position, boolean refreshPosition) {
+            if (subscriptionController != null && subscriptionController.blocked()) {
+                preparationFailed = true;
+                screen.showPreparationFailure("订阅已失效，请返回设置更新订阅。");
+                updateActions(); return;
+            }
             final int request = ++preparationRequest;
             final int expected = page;
             preparationFailed = false;
@@ -1537,6 +1755,11 @@ public final class MainActivity extends Activity {
                     JellyfinApi.Stream resolved = connection.stream(item, policy, retrySource, retryAudio, subtitle);
                     onPage(expected, () -> {
                         if (playback != this || preparationRequest != request) return;
+                        if (subscriptionController != null && subscriptionController.blocked()) {
+                            preparationFailed = true;
+                            screen.showPreparationFailure("订阅已失效，请返回设置更新订阅。");
+                            updateActions(); return;
+                        }
                         startPlayback(resolved, this, resolvedPosition, true, false, retryParameters);
                     });
                 } catch (Exception error) {
@@ -1612,7 +1835,9 @@ public final class MainActivity extends Activity {
             boolean enabled = ready();
             boolean audio = enabled && (stream.hls ? !stream.audio.isEmpty()
                     : !PlaybackTracks.supported(player.getCurrentTracks(), C.TRACK_TYPE_AUDIO).isEmpty());
-            screen.updateActions(episodic(), enabled && previous != null, enabled && next != null, enabled, audio);
+            boolean canChangeEpisode = subscriptionController == null || !subscriptionController.blocked();
+            screen.updateActions(episodic(), enabled && canChangeEpisode && previous != null,
+                    enabled && canChangeEpisode && next != null, enabled, audio);
         }
 
         void chooseSubtitle() {
@@ -1784,12 +2009,29 @@ public final class MainActivity extends Activity {
             switchTo(target, audioIndex, requestedSubtitle, requestedLocal, -1, null, false);
         }
 
+        PlaybackPolicy policyFor(JellyfinApi.Item target) {
+            if (target == item || settings == null) return policy;
+            android.util.DisplayMetrics metrics = getResources().getDisplayMetrics();
+            return PlaybackPolicy.fromSettings(settings.resolution, settings.bitrate, metrics.widthPixels, metrics.heightPixels);
+        }
+
         void switchTo(JellyfinApi.Item target, Integer audioIndex, int requestedSubtitle, PlaybackTracks.LocalTrack requestedLocal,
                       int forceSubtitleIndex, SubtitleRecovery.Action recoveryAction, boolean reuseStream) {
             boolean sameEpisode = target == item;
+            if (!sameEpisode && subscriptionController != null && subscriptionController.blocked()) {
+                autoAdvancePending = false;
+                Toast.makeText(MainActivity.this, "订阅已失效，请在当前集结束后更新订阅", Toast.LENGTH_SHORT).show();
+                updateActions(); return;
+            }
+            PlaybackPolicy targetPolicy = policyFor(target);
+            String targetQuality = sameEpisode ? qualityText : PlaybackPolicy.RESOLUTION_LABELS[PlaybackPolicy.optionIndex(
+                    PlaybackPolicy.WIDTHS, settings.resolution, PlaybackPolicy.WIDTH)] + " · "
+                    + PlaybackPolicy.RATE_LABELS[PlaybackPolicy.optionIndex(PlaybackPolicy.RATES, settings.bitrate, PlaybackPolicy.TOTAL_BPS)];
             PlaybackChange pending = new PlaybackChange(stream, target, player.getCurrentPosition(),
                     player.getPlayWhenReady(), player.getPlaybackState() == Player.STATE_ENDED,
                     subtitle, localSubtitle, player.getTrackSelectionParameters());
+            pending.previousPolicy = policy;
+            pending.previousQuality = qualityText;
             autoAdvancePending = false;
             change = pending;
             pending.recoveryAction = recoveryAction;
@@ -1808,12 +2050,16 @@ public final class MainActivity extends Activity {
                 try {
                     JellyfinApi.Stream resolved = recoveryAction == SubtitleRecovery.Action.DISABLE ? recoveryOriginal
                             : reuseStream ? pending.previous : sameEpisode
-                            ? connection.stream(target, policy, pending.previous.sourceId, targetAudio, targetSubtitle, forceSubtitleIndex)
-                            : connection.stream(target, policy, null, null, targetSubtitle);
+                            ? connection.stream(target, targetPolicy, pending.previous.sourceId, targetAudio, targetSubtitle, forceSubtitleIndex)
+                            : connection.stream(target, targetPolicy, null, null, targetSubtitle);
                     ui.post(() -> {
                         if (playback != this || change != pending) return;
+                        if (!sameEpisode && subscriptionController != null && subscriptionController.blocked()) {
+                            recoverSwitch(); autoAdvancePending = false; updateActions(); return;
+                        }
                         releasePlayer(false);
                         pending.replaced = true;
+                        policy = targetPolicy; qualityText = targetQuality; screen.setQualityLimit(qualityText);
                         subtitle = targetSubtitle;
                         localSubtitle = sameEpisode ? requestedLocal : null;
                         long position = sameEpisode ? pending.position : target.resumeMs;
@@ -1834,6 +2080,9 @@ public final class MainActivity extends Activity {
         void recoverSwitch() {
             PlaybackChange pending = change;
             change = null;
+            if (pending.previousPolicy != null) {
+                policy = pending.previousPolicy; qualityText = pending.previousQuality; screen.setQualityLimit(qualityText);
+            }
             subtitle = pending.subtitle;
             localSubtitle = pending.localSubtitle;
             boolean resume = pending.playWhenReady && !pending.endedBeforeSwitch;
@@ -1878,6 +2127,8 @@ public final class MainActivity extends Activity {
         boolean replaced, wasReported;
         SubtitleRecovery.Action recoveryAction;
         int recoveryIndex = -1;
+        PlaybackPolicy previousPolicy;
+        String previousQuality;
 
         PlaybackChange(JellyfinApi.Stream previous, JellyfinApi.Item target, long position, boolean playWhenReady,
                        boolean endedBeforeSwitch, int subtitle, PlaybackTracks.LocalTrack localSubtitle,
@@ -2101,9 +2352,14 @@ public final class MainActivity extends Activity {
 
     private void enqueueReport(JellyfinApi connection, JellyfinApi.Stream active, String event, long position,
                                boolean paused) {
+        LocalProgress stopped = "Stopped".equals(event) ? localProgress.get(active.itemId) : null;
         worker.execute(() -> {
             try {
                 connection.report(active, event, position, paused);
+                if (stopped != null) ui.post(() -> {
+                    if (api == connection && localProgress.get(active.itemId) == stopped
+                            && Math.abs(stopped.position - position) < 1500) stopped.reported = true;
+                });
             } catch (Exception error) {
                 Log.w(JellyfinApi.TAG, "Unable to report playback status");
             }
@@ -2119,11 +2375,17 @@ public final class MainActivity extends Activity {
         releasePlayer(true);
         playback = null;
         exitFullscreenPlayback();
+        if (!closing) ui.post(() -> {
+            if (closing || subscriptionController == null || playback != null) return;
+            if (subscriptionController.blocked()) showBlockedSubscription();
+            else if (pendingSubscription != null) applySubscription(pendingSubscription);
+        });
     }
 
     private void releasePlayer(boolean reportStop) {
         ui.removeCallbacks(progress);
         if (player != null) {
+            rememberPlaybackProgress();
             if (reportStop) report("Stopped");
             playbackStarted = false;
             stream = null;
@@ -2141,6 +2403,7 @@ public final class MainActivity extends Activity {
     }
 
     @Override protected void onStop() {
+        ui.removeCallbacks(subscriptionTick);
         if (playback != null) {
             playback.foreground = false;
             playback.autoAdvancePending = false;
@@ -2155,10 +2418,15 @@ public final class MainActivity extends Activity {
 
     @Override protected void onStart() {
         super.onStart();
+        ui.removeCallbacks(subscriptionTick);
+        ui.postDelayed(subscriptionTick, 3000);
         if (playback != null) playback.foreground = true;
     }
 
     @Override protected void onDestroy() {
+        closing = true;
+        ui.removeCallbacks(subscriptionTick);
+        if (subscriptionController != null) subscriptionController.close();
         page++;
         stopPlayback();
         worker.shutdown();
@@ -2187,7 +2455,14 @@ public final class MainActivity extends Activity {
 
     private int dp(int value) { return Math.round(getResources().getDisplayMetrics().density * value); }
     private int contentGutter() { return dp(getResources().getConfiguration().screenWidthDp <= 355 ? 16 : 20); }
-    private int screenWidth() { return Math.max(1, getResources().getDisplayMetrics().widthPixels - 2 * contentGutter()); }
+    private int screenWidth() {
+        // Cached pages render immediately, before the asynchronous landscape -> portrait change finishes.
+        if (getResources().getConfiguration().orientation == android.content.res.Configuration.ORIENTATION_PORTRAIT) {
+            browsingWidthPixels = getResources().getDisplayMetrics().widthPixels;
+            browsingHeightDp = getResources().getConfiguration().screenHeightDp;
+        }
+        return Math.max(1, browsingWidthPixels - 2 * contentGutter());
+    }
     private void section(LinearLayout parent, String title) {
         TextView heading = libraryUi.label(title, 26, LibraryUi.TEXT, true);
         heading.setPadding(0, dp(18), 0, dp(9));

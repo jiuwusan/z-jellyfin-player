@@ -2,14 +2,12 @@ package cn.jiuwusan.jellyfin.player;
 
 import android.content.Context;
 import android.content.res.ColorStateList;
-import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.RippleDrawable;
 import android.os.Handler;
 import android.text.TextUtils;
-import android.util.LruCache;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.ViewConfiguration;
@@ -19,10 +17,7 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.TextView;
-import java.io.IOException;
 import java.util.List;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 final class LibraryUi {
     static final int BACKGROUND = 0xff101010;
@@ -43,10 +38,7 @@ final class LibraryUi {
 
     private final Context context;
     private final Handler main;
-    private final ExecutorService images = Executors.newFixedThreadPool(3);
-    private final LruCache<String, Bitmap> cache = new LruCache<String, Bitmap>(12 * 1024 * 1024) {
-        @Override protected int sizeOf(String key, Bitmap bitmap) { return bitmap.getAllocationByteCount(); }
-    };
+    private ArtworkLoader artwork;
     private JellyfinApi connection;
 
     LibraryUi(Context context, Handler main) {
@@ -56,7 +48,8 @@ final class LibraryUi {
 
     void useConnection(JellyfinApi client) {
         connection = client;
-        cache.evictAll();
+        if (artwork == null) artwork = new ArtworkLoader(context, main);
+        else artwork.reset();
     }
 
     Context context() { return context; }
@@ -290,6 +283,16 @@ final class LibraryUi {
         return picture(item, wide, RADIUS_SMALL, false, false);
     }
 
+    static String artworkKey(JellyfinApi.Item item, boolean wide, boolean preferSeriesBackdrop, boolean originalWidth) {
+        String series = preferSeriesBackdrop ? item.seriesBackdropId : "";
+        boolean backdrop = !series.isEmpty() || wide && item.hasBackdrop;
+        String owner = !series.isEmpty() ? series : backdrop || item.hasPoster ? item.id : item.seriesId;
+        String revision = !series.isEmpty() ? item.seriesBackdropTag : backdrop ? item.backdropTag : item.posterTag;
+        return owner + (backdrop ? ":backdrop" : ":primary")
+                + (originalWidth ? ":original:" + (wide ? "wide" : "portrait") : backdrop ? ":640" : ":420")
+                + ":" + revision;
+    }
+
     private FrameLayout picture(JellyfinApi.Item item, boolean wide, int radius,
                                 boolean preferSeriesBackdrop, boolean originalWidth) {
         FrameLayout cover = new FrameLayout(context);
@@ -302,26 +305,16 @@ final class LibraryUi {
         JellyfinApi client = connection;
         String seriesBackdropId = preferSeriesBackdrop ? item.seriesBackdropId : "";
         if (client != null && (item.hasPoster || item.hasBackdrop && wide || !item.seriesId.isEmpty())) {
-            String key = item.id + (wide ? ":wide" : ":portrait");
-            String cacheKey = originalWidth ? key + ":original"
-                    : seriesBackdropId.isEmpty() ? key : key + ":series-backdrop:" + seriesBackdropId;
-            Bitmap hit = cache.get(cacheKey);
-            if (hit != null) {
-                image.setImageBitmap(hit);
+            String cacheKey = artworkKey(item, wide, preferSeriesBackdrop, originalWidth);
+            if (seriesBackdropId.isEmpty()) {
+                artwork.bind(image, cacheKey, originalWidth, (width, height) ->
+                        client.artwork(item, wide, "", originalWidth, width, height));
             } else {
-                images.execute(() -> {
-                    try {
-                        Bitmap bitmap = client.artwork(item, wide, seriesBackdropId, originalWidth);
-                        if (bitmap != null) main.post(() -> {
-                            if (connection != client) return;
-                            cache.put(cacheKey, bitmap);
-                            image.setImageBitmap(bitmap);
-                            LoadingUi.ready(image);
-                        });
-                    } catch (IOException ignored) {
-                        // The placeholder remains usable on failed image requests.
-                    }
-                });
+                // Shared series artwork and an episode-specific fallback must never share a cache entry.
+                artwork.bind(image, cacheKey, originalWidth, (width, height) ->
+                                client.backdrop(seriesBackdropId, originalWidth, width, height),
+                        artworkKey(item, wide, false, originalWidth), (width, height) ->
+                                client.artwork(item, wide, "", originalWidth, width, height));
             }
         }
         return cover;
@@ -388,7 +381,6 @@ final class LibraryUi {
 
     void close() {
         connection = null;
-        cache.evictAll();
-        images.shutdownNow();
+        if (artwork != null) artwork.close();
     }
 }

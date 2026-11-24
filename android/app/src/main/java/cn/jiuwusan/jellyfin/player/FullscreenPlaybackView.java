@@ -346,6 +346,11 @@ final class FullscreenPlaybackView extends FrameLayout {
         restartControlsTimeout();
     }
 
+    void setQualityLimit(String value) {
+        quality.setText(value);
+        quality.setContentDescription("播放画质上限 " + value);
+    }
+
     void updateActions(boolean episodic, boolean canGoBack, boolean canGoNext, boolean textAvailable,
                        boolean audioAvailable) {
         previous.setVisibility(episodic ? VISIBLE : GONE);

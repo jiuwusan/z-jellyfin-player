@@ -57,6 +57,12 @@ public final class LoadingTransitionCheck extends Instrumentation {
         if (failure.get() != null) throw new AssertionError(failure.get());
     }
     @Override public void onStart() {
+        if ("subscription-controller".equals(collectionSuite)) { new SubscriptionControllerCheck(this).run(); return; }
+        if ("subscription-lifecycle".equals(collectionSuite)) { new SubscriptionLifecycleCheck(this).run(); return; }
+        if ("subscription".equals(collectionSuite)) { new SubscriptionCheck(this).run(); return; }
+        if ("artwork-loader".equals(collectionSuite)) { new ArtworkLoaderCheck(this).run(); return; }
+        if ("artwork-return".equals(collectionSuite)) { new ArtworkReturnCheck(this).run(); return; }
+        if ("browse-return".equals(collectionSuite)) { new BrowseReturnCheck(this).run(); return; }
         if ("srt-timeline".equals(collectionSuite)) { new SrtTimelineCheck(this).run(); return; }
         if ("srt-seek".equals(collectionSuite)) { new SubtitleCompatibilityCheck(this).runSrtCompatibility(); return; }
         if ("srt-budget".equals(collectionSuite)) { new SubtitleRecoveryRealCheck(this).run("srt-budget"); return; }
