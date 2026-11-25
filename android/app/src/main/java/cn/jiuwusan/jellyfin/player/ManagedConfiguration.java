@@ -61,12 +61,12 @@ final class ManagedConfiguration {
       if (refresh < 300 || refresh > 86400 || min < 1 || min > clientVersion)
         throw new IllegalArgumentException("配置不兼容，请更新 App");
       JSONObject connection = value.getJSONObject("connection"),
-          proxy = connection.getJSONObject("proxy"),
+          proxy = connection.isNull("proxy") ? null : connection.getJSONObject("proxy"),
           jellyfin = connection.getJSONObject("jellyfin"),
           policy = value.getJSONObject("playback");
-      if (!"http".equals(string(proxy, "type", 16))) throw new IllegalArgumentException("不支持的代理协议");
-      String host = string(proxy, "host", 253);
-      if (host.trim().isEmpty() || host.matches(".*[\\s/@?#\\\\].*"))
+      if (proxy != null && !"http".equals(string(proxy, "type", 16))) throw new IllegalArgumentException("不支持的代理协议");
+      String host = proxy == null ? "" : string(proxy, "host", 253);
+      if (proxy != null && (host.trim().isEmpty() || host.matches(".*[\\s/@?#\\\\].*")))
         throw new IllegalArgumentException("代理地址无效");
       String resolution = string(policy, "resolution", 16);
       String[] names = {"auto", "screen", "360p", "480p", "720p", "1080p", "4k", "8k"};
@@ -82,9 +82,9 @@ final class ManagedConfiguration {
           new ConnectionSettings(
               string(jellyfin, "baseUrl", 2048),
               host,
-              integer(proxy, "port"),
-              string(proxy, "username", 256),
-              string(proxy, "password", 1024),
+              proxy == null ? 0 : integer(proxy, "port"),
+              proxy == null ? "" : string(proxy, "username", 256),
+              proxy == null ? "" : string(proxy, "password", 1024),
               string(jellyfin, "username", 256),
               string(jellyfin, "password", 1024),
               width,

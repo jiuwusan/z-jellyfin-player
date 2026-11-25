@@ -38,8 +38,8 @@ final class JellyfinApi {
     JellyfinApi(ConnectionSettings settings, String device) {
         this.settings = settings;
         this.device = device;
-        Proxy proxy = new Proxy(Proxy.Type.HTTP, InetSocketAddress.createUnresolved(settings.host, settings.port));
-        String proxyAuth = settings.proxyUser.isEmpty() ? null :
+        Proxy proxy = settings.hasProxy() ? new Proxy(Proxy.Type.HTTP, InetSocketAddress.createUnresolved(settings.host, settings.port)) : Proxy.NO_PROXY;
+        String proxyAuth = !settings.hasProxy() || settings.proxyUser.isEmpty() ? null :
                 Credentials.basic(settings.proxyUser, settings.proxyPassword, StandardCharsets.UTF_8);
         http = new OkHttpClient.Builder().proxy(proxy).followRedirects(false).followSslRedirects(false)
                 .connectTimeout(10, TimeUnit.SECONDS).readTimeout(45, TimeUnit.SECONDS)

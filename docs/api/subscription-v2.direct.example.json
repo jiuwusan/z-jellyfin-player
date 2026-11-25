@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 2,
+  "subscriptionId": "0123456789abcdef0123456789abcdef",
+  "revision": 1,
+  "minClientVersionCode": 72,
+  "refreshIntervalSeconds": 900,
+  "connection": {
+    "jellyfin": {
+      "baseUrl": "https://media.example.com/jellyfin/",
+      "username": "example",
+      "password": "example-placeholder"
+    }
+  },
+  "playback": {
+    "resolution": "1080p",
+    "totalBitrateBps": 4000000
+  },
+  "serverInstanceId": "11111111111111111111111111111111"
+}

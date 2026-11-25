@@ -38,12 +38,14 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "proxy",
         "jellyfin"
       ],
       "properties": {
         "proxy": {
-          "type": "object",
+          "type": [
+            "object",
+            "null"
+          ],
           "additionalProperties": false,
           "required": [
             "type",

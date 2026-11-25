@@ -39,7 +39,8 @@ final class ConnectionSettings {
             throw new IllegalArgumentException("服务器地址无效");
         }
         this.host = host.trim();
-        if (this.host.isEmpty() || port < 1 || port > 65535 || user.trim().isEmpty() || password.isEmpty()) {
+        boolean direct = this.host.isEmpty() && port == 0 && proxyUser.trim().isEmpty() && proxyPassword.isEmpty();
+        if ((!direct && (this.host.isEmpty() || port < 1 || port > 65535)) || user.trim().isEmpty() || password.isEmpty()) {
             throw new IllegalArgumentException("检查代理地址、端口和 Jellyfin 账号");
         }
         this.port = port;
@@ -52,6 +53,8 @@ final class ConnectionSettings {
         this.audioLanguage = audioLanguage == null ? LanguagePreferences.DEFAULT : audioLanguage.trim();
         this.subtitleLanguage = subtitleLanguage == null ? LanguagePreferences.DEFAULT : subtitleLanguage.trim();
     }
+
+    boolean hasProxy() { return !host.isEmpty(); }
 
     void save(Context ctx) throws Exception {
         JSONObject value = toJson();

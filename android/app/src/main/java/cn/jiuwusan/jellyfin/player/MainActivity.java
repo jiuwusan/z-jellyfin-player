@@ -374,7 +374,7 @@ public final class MainActivity extends Activity {
             text(view, "配置来源：" + SubscriptionClient.Link.parse(active.link).url.host());
             text(view, "上次同步：" + android.text.format.DateFormat.format("yyyy-MM-dd HH:mm", active.checkedAt));
             ConnectionSettings managed = active.configuration.settings(settings);
-            text(view, "代理地址：" + managed.host + ":" + managed.port);
+            text(view, managed.hasProxy() ? "代理地址：" + managed.host + ":" + managed.port : "连接方式：直连");
             text(view, "Jellyfin 服务地址：" + managed.server);
             text(view, "Jellyfin 账号：" + managed.user);
             managedQuality = text(view, "画质由服务端管理："
@@ -635,7 +635,7 @@ public final class MainActivity extends Activity {
     private void connect(ConnectionSettings candidate, long splashReadyAt, boolean recoverOnFailure) {
         if (splashReadyAt == 0) {
             LinearLayout view = panel("正在连接 Jellyfin", false, () -> settingsPage(""));
-            text(view, "通过家庭 HTTP 代理连接。");
+            text(view, candidate.hasProxy() ? "通过家庭 HTTP 代理连接。" : "正在直连 Jellyfin。");
             button(view, "连接设置", () -> settingsPage(""));
         }
         int expected = page;
@@ -2699,7 +2699,7 @@ public final class MainActivity extends Activity {
                     || detail.startsWith("HTTP 代理认证失败") || detail.equals("没有可用片源")) return detail;
         }
         if (error instanceof java.net.UnknownHostException || error instanceof java.net.ConnectException
-                || error instanceof java.net.SocketTimeoutException) return "代理连接失败或超时，请检查网络和代理地址。";
+                || error instanceof java.net.SocketTimeoutException) return "连接失败或超时，请检查网络、服务地址和连接配置。";
         Log.w(JellyfinApi.TAG, fallback + " " + error.getClass().getSimpleName());
         return fallback + "。请检查连接设置。";
     }

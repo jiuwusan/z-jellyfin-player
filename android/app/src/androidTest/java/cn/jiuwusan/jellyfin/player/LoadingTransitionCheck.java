@@ -29,11 +29,13 @@ public final class LoadingTransitionCheck extends Instrumentation {
     private boolean playbackSuite;
     private boolean realPlaybackSuite;
     private String collectionSuite;
+    private String directEndpoint;
     @Override public void onCreate(Bundle args) {
         super.onCreate(args);
         playbackSuite = args != null && "playback".equals(args.getString("suite"));
         realPlaybackSuite = args != null && "playback-real".equals(args.getString("suite"));
         collectionSuite = args == null ? "" : args.getString("suite", "");
+        directEndpoint = args == null ? null : args.getString("server");
         start();
     }
     private void check(boolean ok, String message) { if (!ok) throw new AssertionError(message); }
@@ -57,6 +59,8 @@ public final class LoadingTransitionCheck extends Instrumentation {
         if (failure.get() != null) throw new AssertionError(failure.get());
     }
     @Override public void onStart() {
+        if ("direct-connection".equals(collectionSuite)) { new DirectConnectionCheck(this).run(); return; }
+        if ("direct-real".equals(collectionSuite)) { new DirectPlaybackRealCheck(this, directEndpoint).run(); return; }
         if ("recycled-lists".equals(collectionSuite)) { new RecycledListsCheck(this).run(); return; }
         if ("recycled-paging".equals(collectionSuite)) { new RecycledPagingCheck(this).run(); return; }
         if ("fullscreen-controls".equals(collectionSuite)) { new FullscreenControlsCheck(this).run(); return; }
