@@ -85,6 +85,7 @@ final class SubtitleHandlingCheck {
         volatile boolean running = true;
         volatile boolean languageScenario;
         volatile boolean includeLoginConfiguration;
+        volatile JSONArray adjacentItems;
         volatile JSONArray audioOverrides;
         volatile Integer defaultAudioOverride;
         volatile JSONArray subtitleOverrides;
@@ -116,6 +117,8 @@ final class SubtitleHandlingCheck {
                         response = "{}";
                     }
                     else if (first.startsWith("GET ") && first.contains("/Users/fixture ")) response = failConfigurationRead ? "{}" : new JSONObject().put("Configuration", configuration).toString();
+                    else if (first.contains("/Episodes?") && adjacentItems != null)
+                        response = new JSONObject().put("Items", adjacentItems).toString();
                     else { bodies.add(request); response = playback(request).toString(); }
                     byte[] data = response.getBytes(StandardCharsets.UTF_8);
                     socket.getOutputStream().write(("HTTP/1.1 " + status + "\r\nContent-Type: application/json\r\nContent-Length: " + data.length + "\r\nConnection: close\r\n\r\n").getBytes(StandardCharsets.US_ASCII));

@@ -57,6 +57,7 @@ public final class LoadingTransitionCheck extends Instrumentation {
         if (failure.get() != null) throw new AssertionError(failure.get());
     }
     @Override public void onStart() {
+        if ("playback-end".equals(collectionSuite)) { new PlaybackEndCheck(this).run(); return; }
         if ("track-memory".equals(collectionSuite)) { new TrackMemoryCheck(this).run(); return; }
         if ("chinese-tracks".equals(collectionSuite)) { new ChineseTrackCheck(this).run(); return; }
         if ("subscription-recovery".equals(collectionSuite)) { new SubscriptionLifecycleCheck(this).runConnectionRecovery(); return; }

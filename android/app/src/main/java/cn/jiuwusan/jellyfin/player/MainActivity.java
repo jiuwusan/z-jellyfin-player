@@ -1807,6 +1807,7 @@ public final class MainActivity extends Activity {
         PlaybackPolicy policy;
         String qualityText;
         final FullscreenPlaybackView screen;
+        final Runnable close;
         JellyfinApi.Item item, previous, next;
         PlaybackChange change;
         int subtitle = PlaybackTracks.AUTO;
@@ -1815,6 +1816,7 @@ public final class MainActivity extends Activity {
         boolean foreground = true;
         boolean loggedSubtitle;
         boolean autoAdvancePending;
+        boolean neighborsResolved, neighborsLoading, endReturnQueued;
         boolean preparationFailed;
         final SubtitleRecovery subtitleRecovery = new SubtitleRecovery();
         final Set<Integer> failedSubtitles = new HashSet<>();
@@ -1828,6 +1830,7 @@ public final class MainActivity extends Activity {
         PlaybackPage(JellyfinApi.Item item, PlaybackPolicy policy, Runnable close) {
             this.item = item;
             this.policy = policy;
+            this.close = close;
             String resolution = PlaybackPolicy.RESOLUTION_LABELS[PlaybackPolicy.optionIndex(
                     PlaybackPolicy.WIDTHS, settings.resolution, PlaybackPolicy.WIDTH)];
             String bitrate = PlaybackPolicy.RATE_LABELS[PlaybackPolicy.optionIndex(
@@ -1921,6 +1924,8 @@ public final class MainActivity extends Activity {
         void loadNeighbors() {
             previous = null;
             next = null;
+            neighborsResolved = "Movie".equals(item.type);
+            neighborsLoading = episodic();
             updateActions();
             if (!episodic()) return;
             JellyfinApi.Item episode = item;
@@ -1929,8 +1934,10 @@ public final class MainActivity extends Activity {
                     List<JellyfinApi.Item> items = connection.adjacentEpisodes(episode);
                     ui.post(() -> {
                         if (playback != this || item != episode) return;
+                        neighborsLoading = false;
                         for (int i = 0; i < items.size(); i++) {
                             if (!episode.id.equals(items.get(i).id)) continue;
+                            neighborsResolved = true;
                             if (i > 0) previous = items.get(i - 1);
                             if (i + 1 < items.size()) next = items.get(i + 1);
                             break;
@@ -1939,6 +1946,7 @@ public final class MainActivity extends Activity {
                         advanceAfterEnd();
                     });
                 } catch (Exception error) {
+                    ui.post(() -> { if (playback == this && item == episode) neighborsLoading = false; });
                     Log.w(JellyfinApi.TAG, "Unable to load adjacent episodes");
                 }
             });
@@ -2153,10 +2161,37 @@ public final class MainActivity extends Activity {
         }
 
         void advanceAfterEnd() {
-            if (!autoAdvancePending || next == null || !foreground || !ready()
+            if (!autoAdvancePending || !foreground || !ready()
                     || player.getPlaybackState() != Player.STATE_ENDED || !player.getPlayWhenReady()) return;
+            if (next == null) {
+                if (!neighborsResolved || endReturnQueued || !(episodic() || "Movie".equals(item.type))) return;
+                ExoPlayer endedPlayer = player;
+                endReturnQueued = true;
+                // Return outside the player event callback; an intervening seek/switch must cancel it.
+                ui.post(() -> {
+                    endReturnQueued = false;
+                    if (playback != this || player != endedPlayer || !autoAdvancePending || !foreground || !ready()
+                            || next != null || !neighborsResolved || screen.soughtToEnd()
+                            || endedPlayer.getPlaybackState() != Player.STATE_ENDED || !endedPlayer.getPlayWhenReady()) return;
+                    autoAdvancePending = false;
+                    Log.i(JellyfinApi.TAG, "Playback naturally completed returning to browse");
+                    close.run();
+                });
+                return;
+            }
             Log.i(JellyfinApi.TAG, "Autoplay next season=" + next.season + " episode=" + next.index);
             changeEpisode(next);
+        }
+
+        void onPlaybackEnded(ExoPlayer source, long initialPosition, boolean userSought) {
+            if (playback != this || player != source || source.getPlaybackState() != Player.STATE_ENDED) return;
+            report("Progress");
+            long duration = source.getDuration();
+            boolean startedAtEnd = !userSought && duration > 0 && initialPosition >= duration;
+            autoAdvancePending = foreground && !preparationFailed && change == null && source.getPlayWhenReady()
+                    && !screen.soughtToEnd() && !startedAtEnd;
+            Log.i(JellyfinApi.TAG, "Playback ended autoAdvanceEligible=" + autoAdvancePending);
+            advanceAfterEnd();
         }
 
         void switchTo(JellyfinApi.Item target, Integer audioIndex) {
@@ -2394,13 +2429,7 @@ public final class MainActivity extends Activity {
                     screen.showVideo();
                     current.updateActions();
                 }
-                report("Progress");
-                long duration = source.getDuration();
-                boolean startedAtEnd = !userSought && duration > 0 && resumeMs >= duration;
-                current.autoAdvancePending = current.foreground && current.change == null
-                        && source.getPlayWhenReady() && !screen.soughtToEnd() && !startedAtEnd;
-                Log.i(JellyfinApi.TAG, "Playback ended autoAdvanceEligible=" + current.autoAdvancePending);
-                current.advanceAfterEnd();
+                current.onPlaybackEnded(active, resumeMs, userSought);
             }
             @Override public void onTracksChanged(Tracks tracks) {
                 if (player != active) return;
