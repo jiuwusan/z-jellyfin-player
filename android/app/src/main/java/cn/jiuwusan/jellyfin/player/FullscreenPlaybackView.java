@@ -131,10 +131,11 @@ final class FullscreenPlaybackView extends FrameLayout {
 
         TextView back = control("返回", "返回", close);
         plainIcon(back, R.drawable.ic_back, 24);
-        header.addView(back, new LinearLayout.LayoutParams(-2, dp(56)));
+        if(!style.largeUi()) back.setText("");
+        header.addView(back, new LinearLayout.LayoutParams(-2, dp(style.size(56,44))));
         LinearLayout titleBlock = style.column();
-        title = singleLine("", 26, LibraryUi.TEXT, true);
-        subtitle = singleLine("", 18, LIGHT_TEXT, false);
+        title = singleLine("", style.size(26,18), LibraryUi.TEXT, true);
+        subtitle = singleLine("", style.size(18,12), LIGHT_TEXT, false);
         titleBlock.addView(title);
         titleBlock.addView(subtitle);
         LinearLayout.LayoutParams titleBounds = new LinearLayout.LayoutParams(0, -2, 1);
@@ -161,9 +162,9 @@ final class FullscreenPlaybackView extends FrameLayout {
         addView(transportRow, new LayoutParams(-1, dp(104), Gravity.TOP));
         counters = new LinearLayout(context);
         counters.setGravity(Gravity.CENTER_VERTICAL);
-        time = singleLine("0:00 / —", 20, LibraryUi.TEXT, false);
+        time = singleLine("0:00 / —", style.size(20,14), LibraryUi.TEXT, false);
         time.setId(R.id.playback_elapsed);
-        quality = singleLine(qualityLimit, 18, LIGHT_TEXT, false);
+        quality = singleLine(qualityLimit, style.size(18,12), LIGHT_TEXT, false);
         quality.setGravity(Gravity.END);
         quality.setContentDescription("播放画质上限 " + qualityLimit);
         counters.addView(time, new LinearLayout.LayoutParams(0, -2, 1));
@@ -172,7 +173,7 @@ final class FullscreenPlaybackView extends FrameLayout {
         ProgressBar bufferingSpinner = new ProgressBar(context);
         bufferingSpinner.setIndeterminateTintList(ColorStateList.valueOf(LibraryUi.ACCENT_LIGHT));
         bufferingStatus.addView(bufferingSpinner, new LinearLayout.LayoutParams(dp(18), dp(18)));
-        TextView bufferingText = singleLine("缓冲中", 16, LIGHT_TEXT, false);
+        TextView bufferingText = singleLine("缓冲中", style.size(16,12), LIGHT_TEXT, false);
         bufferingText.setPadding(dp(6), 0, dp(6), 0);
         bufferingStatus.addView(bufferingText);
         bufferingStatus.setVisibility(GONE);
@@ -196,7 +197,7 @@ final class FullscreenPlaybackView extends FrameLayout {
         forward = addTransport("前进15秒", "前进 15 秒", R.drawable.ic_player_forward, 40, () -> seekBy(15_000));
         next = addTransport("下一集", "下一集", R.drawable.ic_player_next, 32, nextEpisode);
 
-        message = style.label("", 20, LibraryUi.TEXT, false);
+        message = style.label("", style.size(20,14), LibraryUi.TEXT, false);
         message.setGravity(Gravity.CENTER);
         message.setPadding(dp(16), dp(12), dp(16), dp(12));
         message.setBackground(style.rounded(0xc0202020, LibraryUi.RADIUS_PANEL));
@@ -235,10 +236,10 @@ final class FullscreenPlaybackView extends FrameLayout {
         failureText.setGravity(Gravity.CENTER);
         failureCopy.addView(failureText, new ScrollView.LayoutParams(-1, -2));
         preparationError.addView(failureCopy, new LinearLayout.LayoutParams(-1, 0, 1));
-        TextView failedTitle = style.label("播放失败", 24, LibraryUi.TEXT, true);
+        TextView failedTitle = style.label("播放失败", style.size(24,18), LibraryUi.TEXT, true);
         failedTitle.setGravity(Gravity.CENTER);
         failureText.addView(failedTitle);
-        preparationReason = style.label("暂时无法播放，请重试。", 18, LIGHT_TEXT, false);
+        preparationReason = style.label("暂时无法播放，请重试。", style.size(18,12), LIGHT_TEXT, false);
         preparationReason.setGravity(Gravity.CENTER);
         preparationReason.setMaxLines(2);
         preparationReason.setPadding(0, dp(4), 0, dp(8));
@@ -297,10 +298,10 @@ final class FullscreenPlaybackView extends FrameLayout {
     }
 
     private TextView control(String label, String description, Runnable action) {
-        TextView button = style.label(label, 20, LibraryUi.TEXT, true);
+        TextView button = style.label(label, style.size(20,14), LibraryUi.TEXT, true);
         button.setSingleLine();
         button.setGravity(Gravity.CENTER);
-        button.setMinWidth(dp(56));
+        button.setMinWidth(dp(style.size(56,44)));
         button.setPadding(dp(8), 0, dp(8), 0);
         button.setContentDescription(description);
         button.setBackground(outline(CONTROL_BACKGROUND, CONTROL_BORDER, LibraryUi.RADIUS_CONTROL));
@@ -313,7 +314,7 @@ final class FullscreenPlaybackView extends FrameLayout {
 
     private TextView addControl(LinearLayout row, String label, String description, Runnable action) {
         TextView button = control(label, description, action);
-        LinearLayout.LayoutParams bounds = new LinearLayout.LayoutParams(-2, dp(56));
+        LinearLayout.LayoutParams bounds = new LinearLayout.LayoutParams(-2, dp(style.size(56,44)));
         if (row.getChildCount() > 0) bounds.setMarginStart(dp(6));
         row.addView(button, bounds);
         return button;
@@ -322,17 +323,19 @@ final class FullscreenPlaybackView extends FrameLayout {
     private void plainIcon(TextView button, int resource, int size) {
         Drawable icon = getContext().getDrawable(resource).mutate();
         icon.setTint(LibraryUi.TEXT);
-        icon.setBounds(0, 0, dp(size), dp(size));
+        int extent=style.size(size,resource==R.drawable.ic_back ? 22 : 18);
+        icon.setBounds(0, 0, dp(extent), dp(extent));
         button.setCompoundDrawablesRelative(icon, null, null, null);
         button.setCompoundDrawablePadding(dp(8));
-        button.setBackgroundColor(Color.TRANSPARENT);
+        if(style.largeUi() || resource==R.drawable.ic_back) button.setBackgroundColor(Color.TRANSPARENT);
     }
 
     private TextView addTransport(String label, String description, int resource, int size, Runnable action) {
         TextView button = control(label, description, action);
         Drawable icon = getContext().getDrawable(resource).mutate();
         icon.setTint(LibraryUi.TEXT);
-        icon.setBounds(0, 0, dp(size), dp(size));
+        int extent=style.size(size,size==40 ? 32 : 22);
+        icon.setBounds(0, 0, dp(extent), dp(extent));
         button.setCompoundDrawables(null, icon, null, null);
         button.setCompoundDrawablePadding(dp(6));
         button.setBackgroundColor(Color.TRANSPARENT);
@@ -540,7 +543,7 @@ final class FullscreenPlaybackView extends FrameLayout {
         circle.setShape(GradientDrawable.OVAL);
         circle.setColor(0xfff3fbff);
         LayerDrawable layers = new LayerDrawable(new Drawable[] {circle, icon});
-        layers.setLayerSize(1, dp(38), dp(38));
+        layers.setLayerSize(1, dp(style.size(38,30)), dp(style.size(38,30)));
         layers.setLayerGravity(1, Gravity.CENTER);
         play.setText("");
         play.setBackground(layers);
@@ -706,9 +709,9 @@ final class FullscreenPlaybackView extends FrameLayout {
         fitPreparation();
         fitTransport();
         LayoutParams panelBounds = (LayoutParams) trackPanel.getLayoutParams();
-        panelBounds.topMargin = topInset + dp(86);
+        panelBounds.topMargin = topInset + dp(style.size(86,67));
         panelBounds.setMarginEnd(gutter + rightInset);
-        panelBounds.width = Math.max(dp(160), Math.min(dp(360), getWidth() - leftInset - rightInset - 2 * gutter));
+        panelBounds.width = Math.max(dp(160), Math.min(dp(style.size(360,280)), getWidth() - leftInset - rightInset - 2 * gutter));
         trackPanel.setLayoutParams(panelBounds);
         fitTrackList();
     }
@@ -718,12 +721,12 @@ final class FullscreenPlaybackView extends FrameLayout {
         int available = getWidth() - 2 * Math.max(leftInset, rightInset) - dp(36);
         boolean compact = available < dp(560);
         boolean shortScreen = getHeight() - topInset - bottomInset < dp(420);
-        int side = dp(shortScreen ? compact ? 72 : 80 : 96);
-        int nav = dp(compact ? 64 : 76), skip = dp(compact ? 92 : 108);
+        int side = dp(style.size(shortScreen ? compact ? 72 : 80 : 96,64));
+        int nav = dp(style.size(compact ? 64 : 76,48)), skip = dp(style.size(compact ? 92 : 108,64));
         int count = previous.getVisibility() == VISIBLE ? 5 : 3;
         int total = side + 2 * skip + (count == 5 ? 2 * nav : 0);
-        int gap = Math.max(0, Math.min(dp(32), (available - total) / (count - 1)));
-        int height = dp(shortScreen ? 80 : 104);
+        int gap = Math.max(0, Math.min(dp(style.size(32,24)), (available - total) / (count - 1)));
+        int height = dp(style.size(shortScreen ? 80 : 104,80));
         LayoutParams row = (LayoutParams) transportRow.getLayoutParams();
         // Keep the action group at the picture's geometric center, even with an asymmetric cutout.
         row.gravity = Gravity.CENTER;
@@ -740,7 +743,7 @@ final class FullscreenPlaybackView extends FrameLayout {
             bounds.width = width; bounds.height = button == play ? side : -1;
             bounds.setMarginStart(first ? 0 : gap); bounds.gravity = Gravity.CENTER_VERTICAL;
             button.setLayoutParams(bounds);
-            if (button != play) button.setTextSize(shortScreen ? 18 : 20);
+            if (button != play) button.setTextSize(style.size(shortScreen ? 18 : 20,12));
             first = false;
         }
     }
@@ -846,11 +849,11 @@ final class FullscreenPlaybackView extends FrameLayout {
         row.setBackground(style.rounded(selected ? SELECTED_BACKGROUND : Color.TRANSPARENT,
                 LibraryUi.RADIUS_CONTROL));
         LinearLayout copy = style.column();
-        copy.addView(singleLine(lines[0], 21, selected ? 0xffa6e9ff : LibraryUi.TEXT, selected));
-        if (lines.length > 1) copy.addView(singleLine(lines[1], 17, LIGHT_TEXT, false));
+        copy.addView(singleLine(lines[0], style.size(21,14), selected ? 0xffa6e9ff : LibraryUi.TEXT, selected));
+        if (lines.length > 1) copy.addView(singleLine(lines[1], style.size(17,12), LIGHT_TEXT, false));
         row.addView(copy, new LinearLayout.LayoutParams(0, -2, 1));
         if (selected) {
-            TextView check = style.label("✓", 16, 0xffa6e9ff, true);
+            TextView check = style.label("✓", style.size(16,12), 0xffa6e9ff, true);
             check.setPadding(dp(7), 0, 0, 0);
             check.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
             row.addView(check);
@@ -859,7 +862,7 @@ final class FullscreenPlaybackView extends FrameLayout {
             dismissChoices();
             selection.choose(index);
         });
-        trackList.addView(row, new LinearLayout.LayoutParams(-1, dp(CHOICE_HEIGHT)));
+        trackList.addView(row, new LinearLayout.LayoutParams(-1, dp(style.size(CHOICE_HEIGHT,48))));
         return row;
     }
 
@@ -880,11 +883,11 @@ final class FullscreenPlaybackView extends FrameLayout {
                 - trackPanel.getPaddingTop() - trackPanel.getPaddingBottom();
         LinearLayout.LayoutParams bounds = (LinearLayout.LayoutParams) trackScroll.getLayoutParams();
         int count = trackList.getChildCount();
-        int minimum = dp(CHOICE_HEIGHT * Math.min(2, count));
+        int minimum = dp(style.size(CHOICE_HEIGHT,48) * Math.min(2, count));
         int screenAvailable = Math.max(0, getHeight() - panelBounds.topMargin - bottomInset - dp(8)
                 - trackPanel.getPaddingTop() - trackPanel.getPaddingBottom());
         // A floating menu may cover the transport controls to keep two complete choices visible.
-        int height = Math.min(dp(CHOICE_HEIGHT * count), Math.min(screenAvailable, Math.max(minimum, available)));
+        int height = Math.min(dp(style.size(CHOICE_HEIGHT,48) * count), Math.min(screenAvailable, Math.max(minimum, available)));
         if (bounds.height != height) {
             bounds.height = height;
             trackScroll.setLayoutParams(bounds);

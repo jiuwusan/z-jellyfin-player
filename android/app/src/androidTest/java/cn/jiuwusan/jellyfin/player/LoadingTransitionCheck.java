@@ -59,6 +59,10 @@ public final class LoadingTransitionCheck extends Instrumentation {
         if (failure.get() != null) throw new AssertionError(failure.get());
     }
     @Override public void onStart() {
+        if ("standard-ui-screens".equals(collectionSuite)) { new StandardUiRealCheck(this).screenshots(); return; }
+        if ("ui-mode".equals(collectionSuite)) { new UiModeCheck(this).run(); return; }
+        if ("fullscreen-standard".equals(collectionSuite)) { new FullscreenControlsCheck(this,true).run(); return; }
+        if ("standard-ui-real".equals(collectionSuite)) { new StandardUiRealCheck(this).run(); return; }
         if ("direct-connection".equals(collectionSuite)) { new DirectConnectionCheck(this).run(); return; }
         if ("direct-real".equals(collectionSuite)) { new DirectPlaybackRealCheck(this, directEndpoint).run(); return; }
         if ("recycled-lists".equals(collectionSuite)) { new RecycledListsCheck(this).run(); return; }

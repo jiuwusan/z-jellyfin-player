@@ -26,7 +26,8 @@ final class RecycledMediaGrid extends RecyclerView {
     static final class Anchor {
         final String key;
         final int offset;
-        Anchor(String key, int offset) { this.key = key; this.offset = offset; }
+        final boolean large;
+        Anchor(String key, int offset, boolean large) { this.key = key; this.offset = offset; this.large=large; }
     }
 
     RecycledMediaGrid(LibraryUi style, int availableWidth, int gutter, View header,
@@ -34,8 +35,8 @@ final class RecycledMediaGrid extends RecyclerView {
         super(style.context());
         this.style = style; this.gutter = gutter; this.header = header;
         this.status = status; this.footer = footer; this.open = open;
-        gap = style.dp(14);
-        columns = availableWidth >= style.dp(650) ? 3 : 2;
+        gap = style.dp(style.size(14,12));
+        columns = style.gridColumns(availableWidth);
         cardWidth = Math.max(1, (availableWidth - gap * (columns - 1)) / columns);
         layout = new GridLayoutManager(style.context(), columns);
         layout.setSpanSizeLookup(new GridLayoutManager.SpanSizeLookup() {
@@ -58,7 +59,7 @@ final class RecycledMediaGrid extends RecyclerView {
                 int column = ((GridLayoutManager.LayoutParams) view.getLayoutParams()).getSpanIndex();
                 out.left = gutter + column * (gap - 2 * gutter) / columns;
                 out.right = gutter + (columns - 1 - column) * (gap - 2 * gutter) / columns;
-                out.bottom = style.dp(26);
+                out.bottom = style.dp(style.size(26,21));
             }
         });
         setAdapter(cards);
@@ -83,7 +84,7 @@ final class RecycledMediaGrid extends RecyclerView {
             for (int i = 0; i < groups.size(); i++) {
                 if (groups.get(i).isEmpty()) continue;
                 if (count != 1 || i != 0) {
-                    View title = style.label(LABELS[i], 24, LibraryUi.TEXT, true);
+                    View title = style.label(LABELS[i], style.size(24,18), LibraryUi.TEXT, true);
                     title.setPadding(0, style.dp(12), 0, style.dp(12));
                     entries.add(new Entry("group:" + i, 3, title, null));
                 }
@@ -104,12 +105,12 @@ final class RecycledMediaGrid extends RecyclerView {
         int position = layout.findFirstVisibleItemPosition();
         if (position < 0 || position >= entries.size()) return null;
         View child = layout.findViewByPosition(position);
-        return child == null ? null : new Anchor(entries.get(position).key, layout.getDecoratedTop(child) - getPaddingTop());
+        return child == null ? null : new Anchor(entries.get(position).key, layout.getDecoratedTop(child) - getPaddingTop(), style.largeUi());
     }
     void restore(Anchor anchor) {
         if (anchor == null) return;
         for (int i = 0; i < entries.size(); i++) if (entries.get(i).key.equals(anchor.key)) {
-            layout.scrollToPositionWithOffset(i, anchor.offset); return;
+            layout.scrollToPositionWithOffset(i, anchor.large == style.largeUi() ? anchor.offset : 0); return;
         }
     }
     boolean nearEnd() {

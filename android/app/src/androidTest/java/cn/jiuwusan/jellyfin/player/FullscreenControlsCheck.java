@@ -21,6 +21,7 @@ import java.util.concurrent.atomic.AtomicReference;
 /** UI-only transport and timeout checks; no media or account writes. */
 final class FullscreenControlsCheck {
     private final Instrumentation test;
+    private final boolean standard;
     private Activity activity;
     private FullscreenPlaybackView screen;
     private ExoPlayer delegate;
@@ -28,7 +29,8 @@ final class FullscreenControlsCheck {
     private long position = 60_000;
     private int captionPadding;
     private final AtomicInteger previous = new AtomicInteger(), next = new AtomicInteger(), selected = new AtomicInteger(-1);
-    FullscreenControlsCheck(Instrumentation test) { this.test = test; }
+    FullscreenControlsCheck(Instrumentation test) { this(test,false); }
+    FullscreenControlsCheck(Instrumentation test, boolean standard) { this.test = test; this.standard=standard; }
     private void check(boolean value, String why) { if (!value) throw new AssertionError(why); }
     private Object get(Object target, String name) throws Exception {
         Field f = target.getClass().getDeclaredField(name); f.setAccessible(true); return f.get(target);
@@ -72,7 +74,9 @@ final class FullscreenControlsCheck {
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK));
             ui(() -> {
                 Field page = MainActivity.class.getDeclaredField("page");page.setAccessible(true);page.setInt(activity,page.getInt(activity)+1);
-                screen = new FullscreenPlaybackView(activity, new LibraryUi(activity,new Handler(Looper.getMainLooper())),
+                LibraryUi display=new LibraryUi(activity,new Handler(Looper.getMainLooper()));
+                display.setLargeUi(!standard);
+                screen = new FullscreenPlaybackView(activity, display,
                         "1080p · 4 Mbps", () -> {}, previous::incrementAndGet, next::incrementAndGet, () -> {}, () -> {});
                 screen.setTitle("魅影神捕", "第2集 · 月下疑踪");
                 Method fullscreen = MainActivity.class.getDeclaredMethod("enterFullscreenPlayback");fullscreen.setAccessible(true);fullscreen.invoke(activity);

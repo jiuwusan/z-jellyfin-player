@@ -1,0 +1,4 @@
+<resources>
+    <item name="browse_item_id" type="id"/>
+    <item name="large_ui_switch" type="id"/>
+</resources>

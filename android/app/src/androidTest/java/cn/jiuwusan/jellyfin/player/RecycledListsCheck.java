@@ -124,7 +124,24 @@ final class RecycledListsCheck {
             ui(() -> { items.clear(); items.add(item("single", "Movie")); grid.display(items, true, false); });
             settle();
             ui(() -> check(grid.getAdapter().getItemCount() == 3, "Pure movie collection gained an extra heading"));
-            result.putString("result", "ALL_PASS: 1000 items / bounded attached cards / poster dimensions / keyed return / late section anchor / recycled click / collection header");
+            ui(() -> {
+                items.clear(); for(int i=0;i<1000;i++) items.add(item("density-"+i,"Movie"));
+                grid=create(false); grid.display(items,false,false); activity.setContentView(grid);
+            });
+            settle(); position(400);
+            ui(() -> {
+                before[0]=grid.anchor(); style.setLargeUi(false);
+                grid=create(false); grid.display(items,false,false); grid.restore(before[0]); activity.setContentView(grid);
+            });
+            settle();
+            ui(() -> {
+                check(((GridLayoutManager)grid.getLayoutManager()).getSpanCount()==3,"Standard grid is not three columns");
+                int original=RecycledListDriver.position(grid,"影片 density-400");
+                View target=((GridLayoutManager)grid.getLayoutManager()).findViewByPosition(original);
+                check(target!=null && target.getGlobalVisibleRect(new android.graphics.Rect()),"Density switch lost visible item");
+                check(grid.getChildCount()<30 && grid.getAdapter().getItemCount()==1001,"Standard grid lost bounded rendering or data");
+            });
+            result.putString("result", "ALL_PASS: 1000 items / bounded attached cards / poster dimensions / keyed return / late section anchor / recycled click / collection header / density switch preserves visible item");
             test.finish(Activity.RESULT_OK, result);
         } catch (Throwable e) {
             result.putString("failure", android.util.Log.getStackTraceString(e)); test.finish(Activity.RESULT_CANCELED, result);

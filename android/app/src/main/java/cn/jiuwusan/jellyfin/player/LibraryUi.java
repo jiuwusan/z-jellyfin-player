@@ -40,6 +40,7 @@ final class LibraryUi {
     private final Handler main;
     private ArtworkLoader artwork;
     private JellyfinApi connection;
+    private DisplayStyle display = new DisplayStyle(true);
 
     LibraryUi(Context context, Handler main) {
         this.context = context;
@@ -53,6 +54,10 @@ final class LibraryUi {
     }
 
     Context context() { return context; }
+    boolean largeUi() { return display.large; }
+    void setLargeUi(boolean large) { display = new DisplayStyle(large); }
+    int size(int large, int standard) { return display.choose(large,standard); }
+    int gridColumns(int width) { return display.columns(Math.round(width / context.getResources().getDisplayMetrics().density)); }
 
     int dp(int size) { return Math.round(context.getResources().getDisplayMetrics().density * size); }
 
@@ -65,9 +70,9 @@ final class LibraryUi {
     TextView label(String text, int size, int color, boolean bold) {
         TextView view = new TextView(context);
         view.setText(text);
-        view.setTextColor(color);
+        view.setTextColor(!largeUi() && color == MUTED ? 0xffadb0b6 : color);
         view.setTextSize(size);
-        if (bold) view.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        if (bold) view.setTypeface(largeUi() ? Typeface.DEFAULT : Typeface.create("sans-serif-medium",Typeface.NORMAL), largeUi() ? Typeface.BOLD : Typeface.NORMAL);
         return view;
     }
 
@@ -148,16 +153,16 @@ final class LibraryUi {
 
     void appendGrid(LinearLayout target, List<JellyfinApi.Item> items, int availableWidth, int start, ItemAction action) {
         if (start >= items.size()) return;
-        int gap = dp(14);
-        int columns = availableWidth >= dp(650) ? 3 : 2;
-        if (context.getResources().getConfiguration().screenWidthDp <= 355) columns = 2;
+        int gap = dp(size(14,12));
+        int columns = gridColumns(availableWidth);
+        if (largeUi() && context.getResources().getConfiguration().screenWidthDp <= 355) columns = 2;
         int width = Math.max(1, (availableWidth - gap * (columns - 1)) / columns);
         LinearLayout row = start % columns == 0 ? null : (LinearLayout) target.getChildAt(target.getChildCount() - 1);
         for (int i = start; i < items.size(); i++) {
             if (i % columns == 0) {
                 row = new LinearLayout(context);
                 LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
-                params.bottomMargin = dp(26);
+                params.bottomMargin = dp(size(26,21));
                 target.addView(row, params);
             }
             JellyfinApi.Item item = items.get(i);
@@ -172,11 +177,12 @@ final class LibraryUi {
         boolean resumeStyle = homeCard && wide;
         int radius = resumeStyle ? RADIUS_PANEL : RADIUS_CONTROL;
         LinearLayout tile = column();
+        tile.setTag(R.id.browse_item_id,item.id);
         FrameLayout cover = picture(item, wide, resumeStyle ? 0 : radius, wide, false);
         int imageWidth = width;
         if (resumeStyle) {
             GradientDrawable surface = rounded(SURFACE, radius);
-            surface.setStroke(dp(1), LINE);
+            surface.setStroke(dp(1), largeUi() ? LINE : 0x0cffffff);
             tile.setBackground(surface);
             tile.setClipToOutline(true);
             int border = dp(1);
@@ -192,23 +198,23 @@ final class LibraryUi {
         LinearLayout copy = tile;
         if (resumeStyle) {
             copy = column();
-            copy.setPadding(dp(11), dp(9), dp(11), dp(11));
+            copy.setPadding(dp(size(11,13)), dp(size(9,12)), dp(size(11,13)), dp(size(11,13)));
             tile.addView(copy);
         }
         String name = item.seriesName.isEmpty() ? item.title : item.seriesName;
-        TextView title = label(name, resumeStyle ? 24 : 22, TEXT, true);
+        TextView title = label(name, resumeStyle ? size(24,16) : size(22,14), TEXT, true);
         if (resumeStyle) {
             android.text.SpannableString caption = new android.text.SpannableString(name
                     + (item.displayYear() > 0 ? "（" + item.displayYear() + "）" : ""));
             if (caption.length() > name.length()) {
-                caption.setSpan(new android.text.style.RelativeSizeSpan(20f / 24f), name.length(), caption.length(), 0);
-                caption.setSpan(new android.text.style.ForegroundColorSpan(MUTED), name.length(), caption.length(), 0);
+                caption.setSpan(new android.text.style.RelativeSizeSpan((float) size(20,12) / size(24,16)), name.length(), caption.length(), 0);
+                caption.setSpan(new android.text.style.ForegroundColorSpan(largeUi() ? MUTED : 0xffadb0b6), name.length(), caption.length(), 0);
                 caption.setSpan(new android.text.style.StyleSpan(Typeface.NORMAL), name.length(), caption.length(), 0);
             }
             title.setText(caption);
             title.setSingleLine(true);
         }
-        title.setMaxLines(resumeStyle ? 1 : 2);
+        title.setMaxLines(resumeStyle || !largeUi() ? 1 : 2);
         title.setEllipsize(TextUtils.TruncateAt.END);
         if (!resumeStyle) title.setPadding(0, dp(7), 0, 0);
         copy.addView(title);
@@ -224,7 +230,7 @@ final class LibraryUi {
                 : episodeTitle.isEmpty() ? episode
                 : episode.isEmpty() ? episodeTitle : episode + " · " + episodeTitle;
         if (!resumeStyle && !subtitle.isEmpty()) {
-            TextView info = label(subtitle, 17, MUTED, false);
+            TextView info = label(subtitle, size(17,12), MUTED, false);
             info.setMaxLines(2);
             info.setEllipsize(TextUtils.TruncateAt.END);
             copy.addView(info);
@@ -237,7 +243,7 @@ final class LibraryUi {
             if (progress && item.durationMs > 0) positionBar(cover, item.resumeMs, item.durationMs);
             String watchTime = time(item.resumeMs) + (item.durationMs > 0 ? " / " + time(item.durationMs) : "");
             if (progress) {
-            TextView elapsed = label(watchTime, 17, TEXT, false);
+            TextView elapsed = label(watchTime, size(17,12), TEXT, false);
             elapsed.setSingleLine(true);
             elapsed.setEllipsize(TextUtils.TruncateAt.END);
             elapsed.setFontFeatureSettings("'tnum'");
@@ -250,15 +256,15 @@ final class LibraryUi {
             }
             if (!item.seriesName.isEmpty() && item.index > 0) {
                 TextView episodeLabel = label((item.season > 1 ? "第" + item.season + "季 " : "")
-                        + "第" + item.index + "集", 20, TEXT, true);
+                        + "第" + item.index + "集", size(20,13), TEXT, true);
                 episodeLabel.setSingleLine(true);
                 episodeLabel.setEllipsize(TextUtils.TruncateAt.END);
                 episodeLabel.setShadowLayer(dp(2), 0, dp(1), 0xcc000000);
                 FrameLayout.LayoutParams episodeBounds = new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM | Gravity.START);
-                episodeBounds.setMargins(dp(12), 0, dp(68), dp(progress ? 54 : 22));
+                episodeBounds.setMargins(dp(12), 0, dp(68), dp(progress ? size(54,42) : size(22,17)));
                 cover.addView(episodeLabel, episodeBounds);
             }
-            TextView type = label(item.series || !item.seriesName.isEmpty() ? "剧集" : "电影", 18, TEXT, false);
+            TextView type = label(item.series || !item.seriesName.isEmpty() ? "剧集" : "电影", size(18,11), TEXT, false);
             type.setPadding(dp(9), dp(3), dp(9), dp(3));
             type.setBackground(rounded(0xb0101010, RADIUS_SMALL));
             FrameLayout.LayoutParams typeBounds = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.END);
@@ -330,8 +336,8 @@ final class LibraryUi {
     final class PosterCard {
         final LinearLayout view = column();
         final ImageView image = new ImageView(context);
-        final TextView title = label("", 22, TEXT, true);
-        final TextView info = label("", 17, MUTED, false);
+        final TextView title = label("", size(22,14), TEXT, true);
+        final TextView info = label("", size(17,12), MUTED, false);
         PosterCard(int width) {
             FrameLayout cover = new FrameLayout(context);
             cover.setBackground(rounded(PANEL, RADIUS_CONTROL));
@@ -344,11 +350,12 @@ final class LibraryUi {
             cover.addView(image, new FrameLayout.LayoutParams(-1, -1));
             view.addView(cover, new LinearLayout.LayoutParams(-1, Math.max(1, width * 24 / 16)));
             title.setPadding(0, dp(7), 0, 0);
-            title.setMaxLines(2); title.setEllipsize(TextUtils.TruncateAt.END);
-            info.setMaxLines(2); info.setEllipsize(TextUtils.TruncateAt.END);
+            title.setMaxLines(largeUi() ? 2 : 1); title.setEllipsize(TextUtils.TruncateAt.END);
+            info.setMaxLines(largeUi() ? 2 : 1); info.setEllipsize(TextUtils.TruncateAt.END);
             view.addView(title); view.addView(info);
         }
         void bind(JellyfinApi.Item item, Runnable action) {
+            view.setTag(R.id.browse_item_id,item.id);
             title.setText(item.seriesName.isEmpty() ? item.title : item.seriesName);
             boolean season = item.season > 0;
             String episode = (season ? "第 " + item.season + " 季" : "")
@@ -373,7 +380,7 @@ final class LibraryUi {
     FrameLayout hero(JellyfinApi.Item item) {
         FrameLayout cover = picture(item, true, 0, false, true);
         cover.setForeground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[] { 0x00202020, 0x40101010, PANEL }));
+                new int[] { 0x00202020, 0x40101010, largeUi() ? PANEL : BACKGROUND }));
         return cover;
     }
 
@@ -396,8 +403,8 @@ final class LibraryUi {
         GradientDrawable badge = rounded(0x80101010, 22);
         badge.setStroke(dp(1), 0x38ffffff);
         play.setBackground(badge);
-        hit.addView(play, new FrameLayout.LayoutParams(dp(44), dp(44), Gravity.CENTER));
-        FrameLayout.LayoutParams bounds = new FrameLayout.LayoutParams(dp(56), dp(56), Gravity.BOTTOM | Gravity.END);
+        hit.addView(play, new FrameLayout.LayoutParams(dp(size(44,34)), dp(size(44,34)), Gravity.CENTER));
+        FrameLayout.LayoutParams bounds = new FrameLayout.LayoutParams(dp(size(56,48)), dp(size(56,48)), Gravity.BOTTOM | Gravity.END);
         bounds.setMarginEnd(dp(6));
         bounds.bottomMargin = dp(14);
         cover.addView(hit, bounds);
@@ -405,7 +412,7 @@ final class LibraryUi {
     }
 
     private void positionBar(FrameLayout frame, long position, long duration) {
-        FrameLayout.LayoutParams bounds = new FrameLayout.LayoutParams(-1, dp(6), Gravity.BOTTOM);
+        FrameLayout.LayoutParams bounds = new FrameLayout.LayoutParams(-1, dp(size(6,3)), Gravity.BOTTOM);
         bounds.setMargins(dp(12), 0, dp(12), dp(9));
         ProgressBar bar = watchProgress(position, duration);
         bar.setProgressBackgroundTintList(ColorStateList.valueOf(0x60ffffff));

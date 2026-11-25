@@ -42,7 +42,7 @@ final class LoadingUi {
         Context context = style.context();
         LinearLayout row = new LinearLayout(context);
         row.setGravity(Gravity.CENTER);
-        row.setMinimumHeight(style.dp(64));
+        row.setMinimumHeight(style.dp(style.size(64,48)));
         row.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         if (spinning) {
             ProgressBar spinner = new ProgressBar(context);
@@ -51,7 +51,7 @@ final class LoadingUi {
             bounds.setMarginEnd(style.dp(12));
             row.addView(spinner, bounds);
         }
-        TextView text = style.label(message, 17, LibraryUi.MUTED, false);
+        TextView text = style.label(message, style.size(17,12), LibraryUi.MUTED, false);
         text.setGravity(Gravity.CENTER);
         row.addView(text);
         return row;
@@ -62,11 +62,11 @@ final class LoadingUi {
         group.setMinimumHeight(style.dp(300));
         group.setGravity(Gravity.CENTER);
         group.setPadding(style.dp(20), style.dp(16), style.dp(20), style.dp(16));
-        TextView heading = style.label(title, 24, LibraryUi.TEXT, true);
+        TextView heading = style.label(title, style.size(24,18), LibraryUi.TEXT, true);
         heading.setGravity(Gravity.CENTER);
         heading.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         group.addView(heading);
-        TextView detail = style.label(hint, 18, LibraryUi.MUTED, false);
+        TextView detail = style.label(hint, style.size(18,14), LibraryUi.MUTED, false);
         detail.setGravity(Gravity.CENTER);
         detail.setPadding(0, style.dp(12), 0, 0);
         group.addView(detail);
@@ -81,7 +81,7 @@ final class LoadingUi {
         group.setPadding(style.dp(compact ? 0 : 20), style.dp(8), style.dp(compact ? 0 : 20), style.dp(8));
         if (compact) group.setOrientation(LinearLayout.HORIZONTAL);
         else {
-            TextView title = style.label("加载失败", 24, LibraryUi.TEXT, true);
+            TextView title = style.label("加载失败", style.size(24,18), LibraryUi.TEXT, true);
             group.addView(title);
         }
         TextView label = style.label(message, compact ? 17 : 18, LibraryUi.MUTED, false);
@@ -223,7 +223,7 @@ final class LoadingUi {
         @Override protected void onMeasure(int widthSpec, int heightSpec) {
             int width = MeasureSpec.getSize(widthSpec), height;
             if (kind == Kind.HOME) height = d(56) + 2 * (width * 9 / 16 + d(64)) + d(20);
-            else if (kind == Kind.GRID) { int cols = width >= d(650) ? 3 : 2; int pw = (width - d(14) * (cols - 1)) / cols; height = 2 * (pw * 3 / 2 + d(64)) + d(26); }
+            else if (kind == Kind.GRID) { int cols = style.gridColumns(width); int pw = (width - d(style.size(14,12)) * (cols - 1)) / cols; height = 2 * (pw * 3 / 2 + d(64)) + d(26); }
             else if (kind == Kind.EPISODES) height = d(330);
             else height = d(heroHeight() + 148 + 180 + 330);
             setMeasuredDimension(width, height);
@@ -249,13 +249,13 @@ final class LoadingUi {
                 for (int i = 0; i < 2; i++) {
                     box(canvas, 0, top, width, width * 9 / 16, 6);
                     box(canvas, d(14), top + width * 9 / 16 + d(19), width * .73f, d(23), 4);
-                    top += width * 9 / 16 + d(84);
+                    top += width * 9 / 16 + d(style.size(84,66));
                 }
             } else if (kind == Kind.GRID) {
-                int cols = width >= d(650) ? 3 : 2;
-                float pw = (width - d(14) * (cols - 1)) / cols, ph = pw * 1.5f;
+                int cols = style.gridColumns(Math.round(width));
+                float pw = (width - d(style.size(14,12)) * (cols - 1)) / cols, ph = pw * 1.5f;
                 for (int row = 0; row < 2; row++) for (int col = 0; col < cols; col++) {
-                    float x = col * (pw + d(14)), y = row * (ph + d(90));
+                    float x = col * (pw + d(style.size(14,12))), y = row * (ph + d(style.size(90,68)));
                     box(canvas, x, y, pw, ph, 6);
                     box(canvas, x, y + ph + d(12), pw * .84f, d(23), 4);
                     box(canvas, x, y + ph + d(45), pw * .55f, d(17), 4);
@@ -269,7 +269,7 @@ final class LoadingUi {
                 float left = d(38) + poster, available = width - left - d(20);
                 if (knownTitle == null || knownTitle.isEmpty()) box(canvas, left, hero + d(16), available, d(32), 4);
                 else {
-                    text.setColor(LibraryUi.TEXT); text.setTextSize(30 * getResources().getDisplayMetrics().scaledDensity);
+                    text.setColor(LibraryUi.TEXT); text.setTextSize(style.size(30,23) * getResources().getDisplayMetrics().scaledDensity);
                     text.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
                     String caption = TextUtils.ellipsize(knownTitle, new android.text.TextPaint(text), Math.max(1, available), TextUtils.TruncateAt.END).toString();
                     canvas.drawText(caption, left, hero + d(43), text);
