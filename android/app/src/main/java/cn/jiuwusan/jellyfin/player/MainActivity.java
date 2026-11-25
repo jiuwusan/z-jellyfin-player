@@ -152,6 +152,11 @@ public final class MainActivity extends Activity {
         }
     };
 
+    @Override protected void attachBaseContext(android.content.Context base) {
+        super.attachBaseContext(base);
+        applyOverrideConfiguration(AppDisplayContext.fontOverride());
+    }
+
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         libraryUi.setLargeUi(DisplayStyle.load(this).large);
