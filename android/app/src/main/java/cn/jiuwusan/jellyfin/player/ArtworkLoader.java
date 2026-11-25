@@ -26,6 +26,7 @@ final class ArtworkLoader {
     private final ExecutorService workers = Executors.newFixedThreadPool(3);
     private final LruCache<String, Bitmap> smallCache, largeCache;
     private final Map<ImageView, Binding> attached = new WeakHashMap<>();
+    private final Map<ImageView, Binding> bindings = new WeakHashMap<>();
     private final Map<String, Job> jobs = new HashMap<>();
     private final LruCache<String, Long> failedRoutes = new LruCache<>(64);
     private final Rect viewport = new Rect();
@@ -58,6 +59,7 @@ final class ArtworkLoader {
     }
 
     void bind(ImageView image, String key, boolean large, Source source, String fallbackKey, Source fallback) {
+        unbind(image);
         if (closed) return;
         Binding binding = new Binding(image, key, large, source, generation);
         binding.fallbackKey = fallbackKey; binding.fallback = fallback;
@@ -70,23 +72,41 @@ final class ArtworkLoader {
             Bitmap fallbackHit = cache(large).get(binding.fallbackKey);
             if (fallbackHit != null) image.setImageBitmap(fallbackHit);
         }
-        image.addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
+        binding.listener = new View.OnAttachStateChangeListener() {
             @Override public void onViewAttachedToWindow(View view) {
-                if (binding.epoch != generation || closed) return;
-                attached.put(image, binding);
-                observe(image.getRootView());
+                ImageView target = (ImageView) view;
+                if (binding.epoch != generation || closed || bindings.get(target) != binding) return;
+                attached.put(target, binding);
+                Bitmap hit = cache(binding.large).get(binding.key);
+                if (hit != null) { target.setImageBitmap(hit); binding.complete = true; }
+                observe(target.getRootView());
                 scheduleScan();
             }
             @Override public void onViewDetachedFromWindow(View view) {
-                attached.remove(image);
+                ImageView target = (ImageView) view;
+                if (attached.get(target) == binding) attached.remove(target);
                 unsubscribe(binding);
+                target.setImageDrawable(null);
+                binding.complete = false;
             }
-        });
+        };
+        bindings.put(image, binding);
+        image.addOnAttachStateChangeListener(binding.listener);
         if (image.isAttachedToWindow()) {
             attached.put(image, binding);
             observe(image.getRootView());
             scheduleScan();
         }
+    }
+
+    void unbind(ImageView image) {
+        Binding previous = bindings.remove(image);
+        if (previous != null) {
+            image.removeOnAttachStateChangeListener(previous.listener);
+            unsubscribe(previous);
+            if (attached.get(image) == previous) attached.remove(image);
+        }
+        image.setImageDrawable(null);
     }
 
     private LruCache<String, Bitmap> cache(boolean large) { return large ? largeCache : smallCache; }
@@ -188,7 +208,7 @@ final class ArtworkLoader {
         generation++;
         for (Job job : jobs.values()) if (job.future != null) job.future.cancel(false);
         jobs.clear();
-        for (ImageView image : new ArrayList<>(attached.keySet())) if (image != null) image.setImageDrawable(null);
+        for (ImageView image : new ArrayList<>(bindings.keySet())) if (image != null) unbind(image);
         attached.clear();
         failedRoutes.evictAll();
         smallCache.evictAll(); largeCache.evictAll();
@@ -208,6 +228,7 @@ final class ArtworkLoader {
         final long epoch;
         boolean complete, failed;
         Job job;
+        View.OnAttachStateChangeListener listener;
         Binding(ImageView image, String key, boolean large, Source source, long epoch) {
             this.image = new WeakReference<>(image); this.key = key; this.large = large; this.source = source; this.epoch = epoch;
         }

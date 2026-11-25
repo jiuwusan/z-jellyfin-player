@@ -62,6 +62,15 @@ final class CollectionsUiCheck {
             check(card.isClickable(), "Card has no action"); card.performClick();
         });
     }
+    private void waitMember(String title) {
+        boolean[] found = {false};
+        for (int i = 0; i < 300 && !found[0]; i++) {
+            ui(() -> { RecycledMediaGrid list = RecycledListDriver.find(root());
+                found[0] = list != null && RecycledListDriver.position(list, title) >= 0; });
+            SystemClock.sleep(100);
+        }
+        check(found[0], "Missing logical collection member");
+    }
     private void collect(View view, List<String> titles, List<String> actual) {
         if (view instanceof TextView && titles.contains(((TextView) view).getText().toString())) actual.add(((TextView) view).getText().toString());
         if (view instanceof ViewGroup) for (int i = 0; i < ((ViewGroup) view).getChildCount(); i++) collect(((ViewGroup) view).getChildAt(i), titles, actual);
@@ -112,43 +121,48 @@ final class CollectionsUiCheck {
                 for (int page = 0; page < 100; page++) {
                     AtomicReference<View> found = new AtomicReference<>(); ui(() -> found.set(text(root(), selected.title)));
                     if (found.get() != null) break;
-                    ui(() -> { ScrollView list = scroll(root()); if (list != null) list.scrollTo(0, list.getChildAt(0).getHeight()); });
+                    ui(() -> {
+                        RecycledMediaGrid list = RecycledListDriver.find(root());
+                        if (list == null) return;
+                        int position = RecycledListDriver.position(list, selected.title);
+                        if (position >= 0) list.scrollToPosition(position);
+                        else list.scrollBy(0, list.getHeight());
+                    });
                     SystemClock.sleep(250);
                 }
                 View card = waitText(selected.title);
-                final int[] outer = new int[1], inner = new int[1];
+                final RecycledMediaGrid.Anchor[] outer = new RecycledMediaGrid.Anchor[1], inner = new RecycledMediaGrid.Anchor[1];
                 ui(() -> {
-                    ScrollView list = scroll(root());
+                    RecycledMediaGrid list = RecycledListDriver.find(root());
                     int[] p = new int[2], q = new int[2]; card.getLocationOnScreen(p); list.getLocationOnScreen(q);
                     list.scrollBy(0, p[1] - q[1] - 120);
                 });
                 SystemClock.sleep(200);
-                ui(() -> outer[0] = scroll(root()).getScrollY());
+                ui(() -> outer[0] = RecycledListDriver.find(root()).anchor());
                 clickCard(selected.title);
-                waitText("合集详情"); waitText(expected.get(0));
+                waitText("合集详情"); waitMember(expected.get(0));
                 ui(() -> {
                     View play = text(root(), "播放");
                     check(play != null && play.isEnabled() && "播放合集".contentEquals(play.getContentDescription())
                             && text(root(), "从头播放") == null, "Collection play action missing or duplicated");
-                    List<String> actual = new ArrayList<>(); collect(root(), expected, actual);
+                    List<String> actual = RecycledListDriver.titles(RecycledListDriver.find(root()));
                     check(actual.equals(expected), "Collection members changed server order");
                 });
                 SystemClock.sleep(1200);
                 shot("collection-" + prefix);
-                ui(() -> { ScrollView list = scroll(root()); list.scrollTo(0, list.getChildAt(0).getHeight()); });
+                ui(() -> { RecycledMediaGrid list = RecycledListDriver.find(root()); list.scrollToPosition(list.getAdapter().getItemCount() - 1); });
                 SystemClock.sleep(200);
-                ui(() -> inner[0] = scroll(root()).getScrollY());
+                ui(() -> inner[0] = RecycledListDriver.find(root()).anchor());
                 clickCard(expected.get(expected.size() - 1));
                 waitText("媒体详情"); waitText(expected.get(expected.size() - 1));
                 ui(() -> activity.onBackPressed());
-                waitText("合集详情"); waitText(expected.get(0)); SystemClock.sleep(250);
+                waitText("合集详情"); waitText(expected.get(expected.size() - 1)); SystemClock.sleep(250);
                 ui(() -> {
-                    check(Math.abs(scroll(root()).getScrollY() - inner[0]) <= 3, "Collection scroll position lost after detail: before="
-                            + inner[0] + " after=" + scroll(root()).getScrollY());
+                    RecycledListDriver.same(RecycledListDriver.find(root()), inner[0]);
                     activity.onBackPressed();
                 });
                 waitText(selected.title); SystemClock.sleep(250);
-                ui(() -> check(Math.abs(scroll(root()).getScrollY() - outer[0]) <= 3, "Outer catalog scroll position lost"));
+                ui(() -> RecycledListDriver.same(RecycledListDriver.find(root()), outer[0]));
                 result.putString(prefix, "members=" + expected.size() + "; order/inner/outer restored");
             }
             check(java.util.Objects.equals(sealed, activity.getSharedPreferences("connection", 0).getString("sealed", null)), "Saved settings changed");

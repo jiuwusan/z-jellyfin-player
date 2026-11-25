@@ -142,12 +142,53 @@ final class ArtworkLoaderCheck {
                 check(cachedFallback.getDrawable() != null && cachedFallback.getAlpha() == 1f,
                         "Cached fallback was not immediately reused");
             });
-            result.putString("result", "ALL_PASS: coalescing / synchronous cache hit / visible-only loading / separate caches / obsolete-account response rejected / distinct resource fallbacks");
+            ImageView[] recycled = new ImageView[1];
+            ui(() -> {
+                content.removeAllViews();
+                recycled[0] = image("recycle-old", false, (w, h) -> bitmap(Color.RED));
+            });
+            waitImage(recycled[0]);
+            CountDownLatch rebound = new CountDownLatch(1);
+            ui(() -> {
+                loader.bind(recycled[0], "recycle-new", false, (w, h) -> {
+                    try { rebound.await(2, TimeUnit.SECONDS); } catch (InterruptedException e) { throw new java.io.IOException(e); }
+                    return bitmap(Color.BLUE);
+                });
+                check(recycled[0].getDrawable() == null, "Rebinding retained the previous item's image");
+            });
+            rebound.countDown(); waitImage(recycled[0]);
+            CountDownLatch obsoleteImage = new CountDownLatch(1);
+            AtomicInteger obsoleteStarted = new AtomicInteger();
+            ui(() -> loader.bind(recycled[0], "late-old", false, (w, h) -> {
+                obsoleteStarted.incrementAndGet();
+                try { obsoleteImage.await(2, TimeUnit.SECONDS); } catch (InterruptedException e) { throw new java.io.IOException(e); }
+                return bitmap(Color.RED);
+            }));
+            for (int i = 0; i < 100 && obsoleteStarted.get() == 0; i++) SystemClock.sleep(10);
+            check(obsoleteStarted.get() == 1, "Delayed old image did not start");
+            ui(() -> loader.bind(recycled[0], "recycle-new", false, (w, h) -> bitmap(Color.BLUE)));
+            obsoleteImage.countDown(); SystemClock.sleep(200);
+            ui(() -> {
+                check(((BitmapDrawable)recycled[0].getDrawable()).getBitmap().getPixel(0, 0) == Color.BLUE,
+                        "Late image response overwrote a rebound card");
+                content.removeView(recycled[0]);
+                check(recycled[0].getDrawable() == null, "Detached card retained its bitmap");
+                content.addView(recycled[0], new LinearLayout.LayoutParams(-1, 300));
+                check(recycled[0].getDrawable() != null, "Reattached cached image was not restored synchronously");
+                loader.unbind(recycled[0]);
+                check(recycled[0].getDrawable() == null, "Explicit recycling retained bitmap");
+            });
+            java.lang.reflect.Field bindings = ArtworkLoader.class.getDeclaredField("bindings"); bindings.setAccessible(true);
+            ui(() -> check(!((java.util.Map<?, ?>) read(bindings, loader)).containsKey(recycled[0]), "Image binding/listener survived explicit unbind"));
+            result.putString("result", "ALL_PASS: coalescing / synchronous cache / visible-only loading / separate caches / obsolete account rejected / distinct fallback / rebind+late response / detach+reattach / explicit unbind");
             test.finish(Activity.RESULT_OK, result);
         } catch (Throwable e) {
             result.putString("failure", android.util.Log.getStackTraceString(e)); test.finish(Activity.RESULT_CANCELED, result);
         } finally {
             release.countDown(); oldRelease.countDown(); if (loader != null) ui(loader::close);
         }
+    }
+    private static Object read(java.lang.reflect.Field field, Object target) {
+        try { return field.get(target); } catch (Exception e) { throw new AssertionError(e); }
     }
 }

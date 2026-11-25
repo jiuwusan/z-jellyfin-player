@@ -110,6 +110,11 @@ final class LoadingUi {
         private final Runnable slow = this::showSlow;
 
         Pending(LinearLayout target, LibraryUi style, Handler handler, Kind kind, String knownTitle, Gate gate) {
+            this(target, style, handler, kind, knownTitle, gate, false);
+        }
+
+        Pending(LinearLayout target, LibraryUi style, Handler handler, Kind kind, String knownTitle, Gate gate,
+                boolean surviveRecycling) {
             this.target = target; this.style = style; this.handler = handler;
             this.kind = kind; this.knownTitle = knownTitle; this.gate = gate;
             group = style.column();
@@ -119,7 +124,11 @@ final class LoadingUi {
             group.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
             group.addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
                 @Override public void onViewAttachedToWindow(View view) { }
-                @Override public void onViewDetachedFromWindow(View view) { cancel(); }
+                // RecyclerView detaches/rebinds a footer while its page request is still active.
+                // Its request owns finish(); other page transitions retain the original cleanup.
+                @Override public void onViewDetachedFromWindow(View view) {
+                    if (!surviveRecycling || !gate.active()) cancel();
+                }
             });
             target.addView(group, new LinearLayout.LayoutParams(-1, -2));
             if (Boolean.TRUE.equals(target.getTag(R.id.loading_handoff))) {

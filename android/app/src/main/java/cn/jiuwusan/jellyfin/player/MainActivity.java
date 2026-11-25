@@ -112,6 +112,7 @@ public final class MainActivity extends Activity {
     private final BrowseMemory browseMemory = new BrowseMemory(40);
     private LibraryCatalog savedCatalog;
     private ScrollView rememberedScroll;
+    private RecycledMediaGrid rememberedGrid;
     private String rememberedKey;
     private LibraryLocation rememberedLibrary;
     private boolean homeDirty;
@@ -703,6 +704,8 @@ public final class MainActivity extends Activity {
     private boolean homePlayLoading;
 
     private void rememberBrowsePosition() {
+        if (rememberedGrid != null && rememberedLibrary != null) rememberedLibrary.anchor = rememberedGrid.anchor();
+        rememberedGrid = null;
         if (rememberedScroll != null) {
             if (rememberedKey != null) browseMemory.position(rememberedKey, rememberedScroll.getScrollY());
             if (rememberedLibrary != null) rememberedLibrary.scrollY = rememberedScroll.getScrollY();
@@ -1005,7 +1008,7 @@ public final class MainActivity extends Activity {
                     location == catalog.selected);
             libraryUi.actionable(chip, () -> {
                 if (location == catalog.selected) return;
-                catalog.selected.scrollY = content.getScrollY();
+                if (rememberedGrid != null) catalog.selected.anchor = rememberedGrid.anchor();
                 catalog.selected = location;
                 catalog.tabScrollX = tabs.getScrollX();
                 librariesPage(catalog);
@@ -1031,6 +1034,7 @@ public final class MainActivity extends Activity {
         JellyfinApi.Item details;
         final List<JellyfinApi.Item> items = new ArrayList<>();
         int scrollY;
+        RecycledMediaGrid.Anchor anchor;
         long lastAccess;
         boolean loaded;
         boolean more = true;
@@ -1116,101 +1120,88 @@ public final class MainActivity extends Activity {
     }
 
     private final class LibraryListing {
-        private final LinearLayout view;
-        private final ScrollView scroll;
+        private final RecycledMediaGrid recycler;
         private final SwipeRefreshLayout refresh;
         private final LinearLayout grid = column();
         private final LinearLayout footer = column();
         private final LibraryLocation location;
         private final Runnable reopen;
         private final int expected = page;
-        private final int gridWidth = screenWidth();
         private final LoadingUi.RefreshNotice notice;
-        private final CollectionGrid collectionGrid;
+        private final boolean collection;
         private boolean loading;
         private boolean failed;
 
         LibraryListing(LinearLayout view, LibraryLocation location, Runnable reopen) {
-            this.view = view;
+            this.location = location;
+            this.reopen = reopen;
+            collection = location.folder != null && location.folder.collection && !location.catalog;
             if (Boolean.TRUE.equals(view.getTag(R.id.loading_handoff))) {
                 grid.setTag(R.id.loading_handoff, true);
                 view.setTag(R.id.loading_handoff, null);
             }
-            this.scroll = (ScrollView) view.getParent();
-            LinearLayout root = (LinearLayout) scroll.getParent();
-            int index = root.indexOfChild(scroll);
-            android.view.ViewGroup.LayoutParams bounds = scroll.getLayoutParams();
-            root.removeView(scroll);
+            ScrollView oldScroll = (ScrollView) view.getParent();
+            LinearLayout root = (LinearLayout) oldScroll.getParent();
+            int index = root.indexOfChild(oldScroll);
+            android.view.ViewGroup.LayoutParams bounds = oldScroll.getLayoutParams();
+            root.removeView(oldScroll);
+            oldScroll.removeView(view);
+            // A collection's existing detail composition becomes a full-span recycled header.
+            view.setPadding(0, 0, 0, 0);
+            recycler = new RecycledMediaGrid(libraryUi, screenWidth(), contentGutter(),
+                    collection ? view : null, grid, footer, this::open);
             refresh = new SwipeRefreshLayout(MainActivity.this);
             refresh.setColorSchemeColors(LibraryUi.ACCENT_LIGHT);
             refresh.setProgressBackgroundColorSchemeColor(LibraryUi.PANEL);
-            refresh.addView(scroll, new android.view.ViewGroup.LayoutParams(-1, -1));
+            refresh.addView(recycler, new android.view.ViewGroup.LayoutParams(-1, -1));
             root.addView(refresh, index, bounds);
             notice = new LoadingUi.RefreshNotice(root, refresh, libraryUi, ui,
                     () -> page == expected && loading, () -> load(true));
             footer.setMinimumHeight(dp(64));
-            refresh.setOnChildScrollUpCallback((parent, child) -> loading || scroll.canScrollVertically(-1));
+            refresh.setOnChildScrollUpCallback((parent, child) -> loading || recycler.canScrollVertically(-1));
             refresh.setOnRefreshListener(() -> load(true));
-            this.location = location;
-            this.reopen = reopen;
-            boolean collection = location.folder != null && location.folder.collection && !location.catalog;
-            collectionGrid = collection ? new CollectionGrid(grid, libraryUi, gridWidth, this::open) : null;
-            if (collection) {
-                grid.setPadding(contentGutter(), 0, contentGutter(), 0);
-                footer.setPadding(contentGutter(), 0, contentGutter(), 0);
-            }
         }
 
         void show() {
-            rememberedScroll = scroll;
+            rememberedGrid = recycler;
             rememberedLibrary = location;
-            view.addView(grid);
-            view.addView(footer);
-            scroll.setOnScrollChangeListener((target, x, y, oldX, oldY) -> {
-                if (y > oldY) loadNearEnd();
+            recycler.addOnScrollListener(new androidx.recyclerview.widget.RecyclerView.OnScrollListener() {
+                @Override public void onScrolled(androidx.recyclerview.widget.RecyclerView view, int dx, int dy) {
+                    if (dy > 0) loadNearEnd();
+                }
             });
-            view.addOnLayoutChangeListener((target, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) ->
-                    scroll.post(this::loadNearEnd));
+            recycler.addOnLayoutChangeListener((target, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) ->
+                    recycler.post(this::loadNearEnd));
             if (location.loaded) {
-                appendItems(0);
-                scroll.getViewTreeObserver().addOnPreDrawListener(new ViewTreeObserver.OnPreDrawListener() {
-                    @Override public boolean onPreDraw() {
-                        scroll.getViewTreeObserver().removeOnPreDrawListener(this);
-                        scroll.scrollTo(0, location.scrollY);
-                        return true;
-                    }
-                });
+                appendItems(false);
+                recycler.restore(location.anchor);
             } else {
+                recycler.display(location.items, collection, false);
                 load();
             }
         }
 
         private void loadNearEnd() {
-            int remaining = view.getBottom() - scroll.getScrollY() - scroll.getHeight();
-            if (location.loaded && !failed && scroll.getHeight() > 0 && remaining <= dp(80)) load();
+            if (page == expected && location.loaded && !failed && recycler.nearEnd()) load();
         }
 
-        private void appendItems(int offset) {
+        private void appendItems(boolean preserve) {
             for (JellyfinApi.Item item : location.items) withLocalProgress(item);
-            if (collectionGrid == null) libraryUi.appendGrid(grid, location.items, gridWidth, offset, this::open);
-            else collectionGrid.append(location.items, offset, scroll);
             footer.removeAllViews();
-            if (location.items.isEmpty()) {
-                grid.removeAllViews();
-                LoadingUi.empty(grid, libraryUi, collectionGrid == null ? "这个媒体库暂无内容" : "这个合集暂无内容",
-                        collectionGrid == null ? "可以切换其他媒体库查看。" : "可以返回查看其他影片。");
-            }
+            grid.removeAllViews();
+            if (location.items.isEmpty()) LoadingUi.empty(grid, libraryUi,
+                    collection ? "这个合集暂无内容" : "这个媒体库暂无内容",
+                    collection ? "可以返回查看其他影片。" : "可以切换其他媒体库查看。");
             else if (!location.more) footer.addView(LoadingUi.line(libraryUi, "已显示全部", false));
+            recycler.display(location.items, collection, preserve);
         }
 
         private void open(JellyfinApi.Item item) {
-            location.scrollY = scroll.getScrollY();
+            location.anchor = recycler.anchor();
             openItem(item, reopen);
         }
 
-        private void load() {
-            load(false);
-        }
+        private void load() { load(false); }
 
         private void load(boolean replace) {
             if (page != expected || loading || !replace && !location.more) return;
@@ -1221,8 +1212,8 @@ public final class MainActivity extends Activity {
             boolean first = !location.loaded;
             if (first) grid.removeAllViews();
             LoadingUi.Pending pending = first ? new LoadingUi.Pending(grid, libraryUi, ui, LoadingUi.Kind.GRID, null,
-                    () -> page == expected && loading) : !replace ? new LoadingUi.Pending(footer, libraryUi, ui, LoadingUi.Kind.FOOTER, null,
-                    () -> page == expected && loading) : null;
+                    () -> page == expected && loading, true) : !replace ? new LoadingUi.Pending(footer, libraryUi, ui, LoadingUi.Kind.FOOTER, null,
+                    () -> page == expected && loading, true) : null;
             if (replace) { refresh.setRefreshing(true); notice.start(); } else notice.clear();
             JellyfinApi connection = api;
             browse.execute(() -> {
@@ -1233,17 +1224,18 @@ public final class MainActivity extends Activity {
                         if (replace) {
                             location.items.clear();
                             location.scrollY = 0;
-                            grid.removeAllViews();
-                            scroll.scrollTo(0, 0);
+                            location.anchor = null;
                         }
                         location.items.addAll(next.items);
                         location.loaded = true;
                         location.more = next.more;
-                        appendItems(offset);
+                        appendItems(!replace);
+                        if (replace) recycler.scrollToPosition(0);
                         loading = false;
                         refresh.setRefreshing(false);
                         notice.clear();
                         if (first) LoadingUi.ready(grid);
+                        recycler.post(this::loadNearEnd);
                         Log.i(JellyfinApi.TAG, "Library page offset=" + offset + " items=" + next.items.size()
                                 + " more=" + next.more + " refresh=" + replace);
                     });
@@ -1263,7 +1255,6 @@ public final class MainActivity extends Activity {
             });
         }
     }
-
     private void openItem(JellyfinApi.Item item, Runnable back) {
         if (item.collection) collectionPage(new LibraryLocation(item, false), back);
         else if ("Episode".equals(item.type)) playbackPage(item, null, back);

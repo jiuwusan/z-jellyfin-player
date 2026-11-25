@@ -114,12 +114,16 @@ final class BrowseReturnCheck {
             ui(() -> invoke("librariesPage", new Class<?>[]{}));
             waitFor(() -> field(activity, "savedCatalog") != null && field(field(field(activity, "savedCatalog"), "selected"), "loaded").equals(true), "Library not loaded");
             SystemClock.sleep(500);
-            int[] libraryY = {0};
-            ui(() -> { ScrollView s = scroll(root()); s.scrollTo(0, 500); libraryY[0] = s.getScrollY();
+            RecycledMediaGrid.Anchor[] libraryAnchor = new RecycledMediaGrid.Anchor[1];
+            ui(() -> ((RecycledMediaGrid)field(activity, "rememberedGrid")).scrollBy(0, 500));
+            test.waitForIdleSync();
+            ui(() -> { libraryAnchor[0] = ((RecycledMediaGrid)field(activity, "rememberedGrid")).anchor();
                 invoke("homePage", new Class<?>[]{}); });
             baseline = requests.get();
             ui(() -> invoke("librariesPage", new Class<?>[]{})); SystemClock.sleep(400);
-            ui(() -> { noSkeleton(); check(Math.abs(scroll(root()).getScrollY() - libraryY[0]) <= 3, "Bottom navigation lost library position"); });
+            ui(() -> { noSkeleton(); RecycledMediaGrid.Anchor restored = ((RecycledMediaGrid)field(activity, "rememberedGrid")).anchor();
+                check(restored != null && restored.key.equals(libraryAnchor[0].key)
+                        && Math.abs(restored.offset - libraryAnchor[0].offset) <= 3, "Bottom navigation lost library position"); });
             check(requests.get() == baseline, "Bottom navigation reloaded library");
             stage("library bottom navigation: data and scroll retained");
             ui(() -> invoke("playbackPage", new Class<?>[]{JellyfinApi.Item.class, Long.class, Runnable.class}, selected,

@@ -302,6 +302,13 @@ final class LibraryUi {
         image.setScaleType(ImageView.ScaleType.CENTER_CROP);
         image.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         cover.addView(image, new FrameLayout.LayoutParams(-1, -1));
+        bindPicture(image, item, wide, preferSeriesBackdrop, originalWidth);
+        return cover;
+    }
+
+    private void bindPicture(ImageView image, JellyfinApi.Item item, boolean wide,
+                             boolean preferSeriesBackdrop, boolean originalWidth) {
+        if (artwork != null) artwork.unbind(image);
         JellyfinApi client = connection;
         String seriesBackdropId = preferSeriesBackdrop ? item.seriesBackdropId : "";
         if (client != null && (item.hasPoster || item.hasBackdrop && wide || !item.seriesId.isEmpty())) {
@@ -317,7 +324,50 @@ final class LibraryUi {
                                 client.artwork(item, wide, "", originalWidth, width, height));
             }
         }
-        return cover;
+    }
+
+    /** A persistent card: only its content and image binding change during recycling. */
+    final class PosterCard {
+        final LinearLayout view = column();
+        final ImageView image = new ImageView(context);
+        final TextView title = label("", 22, TEXT, true);
+        final TextView info = label("", 17, MUTED, false);
+        PosterCard(int width) {
+            FrameLayout cover = new FrameLayout(context);
+            cover.setBackground(rounded(PANEL, RADIUS_CONTROL));
+            cover.setClipToOutline(true);
+            GradientDrawable outline = rounded(Color.TRANSPARENT, RADIUS_CONTROL);
+            outline.setStroke(dp(1), 0x18ffffff);
+            cover.setForeground(outline);
+            image.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            image.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+            cover.addView(image, new FrameLayout.LayoutParams(-1, -1));
+            view.addView(cover, new LinearLayout.LayoutParams(-1, Math.max(1, width * 24 / 16)));
+            title.setPadding(0, dp(7), 0, 0);
+            title.setMaxLines(2); title.setEllipsize(TextUtils.TruncateAt.END);
+            info.setMaxLines(2); info.setEllipsize(TextUtils.TruncateAt.END);
+            view.addView(title); view.addView(info);
+        }
+        void bind(JellyfinApi.Item item, Runnable action) {
+            title.setText(item.seriesName.isEmpty() ? item.title : item.seriesName);
+            boolean season = item.season > 0;
+            String episode = (season ? "第 " + item.season + " 季" : "")
+                    + (item.index > 0 ? (season ? " · " : "") + "第 " + item.index + " 集" : "");
+            String name = episodeTitle(item);
+            String type = item.collection ? "合集" : item.series ? "剧集" : "Movie".equals(item.type) ? "电影" : "";
+            String year = item.collection ? item.childCount >= 0 ? item.childCount + " 项" : ""
+                    : item.year > 0 ? Integer.toString(item.year) : "";
+            String caption = item.seriesName.isEmpty() ? type.isEmpty() ? year : year.isEmpty() ? type : type + " · " + year
+                    : name.isEmpty() ? episode : episode.isEmpty() ? name : episode + " · " + name;
+            info.setText(caption); info.setVisibility(caption.isEmpty() ? View.GONE : View.VISIBLE);
+            scrollActionable(view, action);
+            bindPicture(image, item, false, false, false);
+        }
+        void unbind() {
+            if (artwork != null) artwork.unbind(image);
+            else image.setImageDrawable(null);
+            view.setOnClickListener(null); view.setOnTouchListener(null);
+        }
     }
 
     FrameLayout hero(JellyfinApi.Item item) {
