@@ -112,12 +112,24 @@ final class JellyfinApi {
     }
 
     void saveLanguagePreferences(String audio, String subtitles) throws Exception {
+        savePlaybackPreferences(audio, subtitles, null);
+    }
+
+    JSONObject playbackPreferences() throws Exception { return userConfiguration(); }
+
+    void savePlaybackPreferences(String audio, String subtitles, boolean preferDefaultAudio) throws Exception {
+        savePlaybackPreferences(audio, subtitles, Boolean.valueOf(preferDefaultAudio));
+    }
+
+    private void savePlaybackPreferences(String audio, String subtitles, Boolean preferDefaultAudio) throws Exception {
         // Fetch the latest complete object so unrelated and newly introduced settings survive the update.
         JSONObject configuration = userConfiguration();
         if (audio.equals(configuration.optString("AudioLanguagePreference", ""))
-                && subtitles.equals(configuration.optString("SubtitleLanguagePreference", ""))) return;
+                && subtitles.equals(configuration.optString("SubtitleLanguagePreference", ""))
+                && (preferDefaultAudio == null || preferDefaultAudio == configuration.optBoolean("PlayDefaultAudioTrack"))) return;
         configuration.put("AudioLanguagePreference", audio).put("SubtitleLanguagePreference", subtitles);
-        json("保存账号语言偏好", url("Users/Configuration").addQueryParameter("userId", userId).build(), configuration);
+        if (preferDefaultAudio != null) configuration.put("PlayDefaultAudioTrack", preferDefaultAudio);
+        json("保存账号播放偏好", url("Users/Configuration").addQueryParameter("userId", userId).build(), configuration);
         accountConfiguration = configuration;
     }
 

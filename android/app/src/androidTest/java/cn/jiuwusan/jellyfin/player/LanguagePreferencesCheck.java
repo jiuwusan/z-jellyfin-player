@@ -77,6 +77,27 @@ final class LanguagePreferencesCheck {
             check(failedWrite && fixture.configurationWrites == 1 && "zho".equals(fixture.configuration.getString("AudioLanguagePreference")),
                     "Rejected account update was treated as success");
             fixture.rejectConfigurationWrite = false;
+            java.lang.reflect.Method playbackWrite = JellyfinApi.class.getDeclaredMethod("savePlaybackPreferences",
+                    String.class, String.class, boolean.class);
+            playbackWrite.invoke(chinese, "zho", "zho", false);
+            check(fixture.configurationWrites == 2 && !fixture.configuration.getBoolean("PlayDefaultAudioTrack"),
+                    "Default audio preference was not disabled");
+            check("None".equals(fixture.configuration.getString("SubtitleMode"))
+                    && fixture.configuration.getBoolean("RememberSubtitleSelections")
+                    && fixture.configuration.getInt("OtherSetting") == 42,
+                    "Saving default audio preference overwrote unrelated settings");
+            playbackWrite.invoke(chinese, "zho", "zho", false);
+            check(fixture.configurationWrites == 2, "Unchanged playback preferences caused a write");
+            playbackWrite.invoke(chinese, "zho", "zho", true);
+            check(fixture.configurationWrites == 3 && fixture.configuration.getBoolean("PlayDefaultAudioTrack"),
+                    "Default audio preference was not re-enabled");
+            fixture.rejectConfigurationWrite = true;
+            boolean rejectedPreference = false;
+            try { playbackWrite.invoke(chinese, "zho", "zho", false); }
+            catch (java.lang.reflect.InvocationTargetException error) { rejectedPreference = error.getCause() instanceof java.io.IOException; }
+            check(rejectedPreference && fixture.configurationWrites == 3 && fixture.configuration.getBoolean("PlayDefaultAudioTrack"),
+                    "Rejected default audio preference update was treated as success");
+            fixture.rejectConfigurationWrite = false;
             ConnectionSettings choice = preferences(settings, "eng", "jpn");
             java.lang.reflect.Method encode = ConnectionSettings.class.getDeclaredMethod("toJson"); encode.setAccessible(true);
             java.lang.reflect.Method decode = ConnectionSettings.class.getDeclaredMethod("fromJson", JSONObject.class); decode.setAccessible(true);
@@ -108,6 +129,7 @@ final class LanguagePreferencesCheck {
             }
             check(real.get() != null, "Device did not automatically log in");
             String[] actual = real.get().languagePreferences();
+            boolean actualDefaultAudio = real.get().playbackPreferences().optBoolean("PlayDefaultAudioTrack");
             String sealed = activity.getSharedPreferences("connection", 0).getString("sealed", null);
             AtomicReference<Throwable> failure = new AtomicReference<>();
             test.runOnMainSync(() -> { try {
@@ -118,6 +140,7 @@ final class LanguagePreferencesCheck {
                 playbackTab.performClick();
                 Spinner audio = (Spinner) find(root, "首选的音频语言"), subtitles = (Spinner) find(root, "字幕语言偏好");
                 check(audio != null && subtitles != null, "Language controls missing");
+                check(find(root, "优先播放默认音轨") instanceof android.widget.Switch, "Default audio switch missing");
             } catch (Throwable e) { failure.set(e); } });
             if (failure.get() != null) throw new AssertionError(failure.get());
             java.util.concurrent.atomic.AtomicBoolean loaded = new java.util.concurrent.atomic.AtomicBoolean();
@@ -125,7 +148,9 @@ final class LanguagePreferencesCheck {
                 test.runOnMainSync(() -> {
                     View root = activity.getWindow().getDecorView();
                     Spinner audio = (Spinner) find(root, "首选的音频语言"), subtitles = (Spinner) find(root, "字幕语言偏好");
+                    android.widget.Switch defaultAudio = (android.widget.Switch) find(root, "优先播放默认音轨");
                     loaded.set(audio.isEnabled() && subtitles.isEnabled()
+                            && defaultAudio.isEnabled() && defaultAudio.isChecked() == actualDefaultAudio
                             && audio.getSelectedItemPosition() == LanguagePreferences.optionIndex(actual[0])
                             && subtitles.getSelectedItemPosition() == LanguagePreferences.optionIndex(actual[1]));
                 });

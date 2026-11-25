@@ -40,6 +40,7 @@ import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.Spinner;
+import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 import androidx.media3.common.C;
@@ -429,37 +430,56 @@ public final class MainActivity extends Activity {
     }
 
     private void subscriptionLanguages(LinearLayout view) {
-        section(view, "播放语言");
+        section(view, "播放偏好");
         JellyfinApi connection = api;
         int expected = page;
         Spinner audio = qualityField(view, "首选的音频语言", LanguagePreferences.LABELS,
                 LanguagePreferences.optionIndex(settings == null ? LanguagePreferences.DEFAULT : settings.audioLanguage));
         Spinner subtitles = qualityField(view, "字幕语言偏好", LanguagePreferences.LABELS,
                 LanguagePreferences.optionIndex(settings == null ? LanguagePreferences.DEFAULT : settings.subtitleLanguage));
-        audio.setEnabled(false); subtitles.setEnabled(false);
+        Switch defaultAudio = new Switch(this);
+        defaultAudio.setText("优先播放默认音轨");
+        defaultAudio.setContentDescription("优先播放默认音轨");
+        defaultAudio.setTextSize(20); defaultAudio.setTextColor(LibraryUi.TEXT);
+        defaultAudio.setPadding(0, dp(12), 0, dp(12));
+        defaultAudio.setMinHeight(dp(56));
+        defaultAudio.setThumbTintList(new ColorStateList(new int[][] {new int[] {android.R.attr.state_checked}, new int[] {}},
+                new int[] {LibraryUi.ACCENT_LIGHT, LibraryUi.MUTED}));
+        view.addView(defaultAudio, new LinearLayout.LayoutParams(-1, -2));
+        text(view, "开启时优先使用文件标记的默认音轨；关闭后按首选语言选择。已记忆的手动选择仍可能优先。");
+        audio.setEnabled(false); subtitles.setEnabled(false); defaultAudio.setEnabled(false);
         boolean[] ready = {false};
         TextView status = text(view, "正在读取 Jellyfin 账号偏好…");
         worker.execute(() -> {
             try {
-                String[] preferences = connection.languagePreferences();
+                org.json.JSONObject preferences = connection.playbackPreferences();
                 onPage(expected, () -> {
                     if (api != connection) return;
-                    audio.setSelection(LanguagePreferences.optionIndex(preferences[0]));
-                    subtitles.setSelection(LanguagePreferences.optionIndex(preferences[1]));
-                    audio.setEnabled(true); subtitles.setEnabled(true); ready[0] = true;
+                    audio.setSelection(LanguagePreferences.optionIndex(preferences.optString("AudioLanguagePreference", "")));
+                    subtitles.setSelection(LanguagePreferences.optionIndex(preferences.optString("SubtitleLanguagePreference", "")));
+                    defaultAudio.setChecked(preferences.optBoolean("PlayDefaultAudioTrack"));
+                    audio.setEnabled(true); subtitles.setEnabled(true); defaultAudio.setEnabled(true); ready[0] = true;
                     status.setText("偏好保存在当前 Jellyfin 账号，Hub 不覆盖此设置。");
                 });
-            } catch (Exception ignored) { onPage(expected, () -> status.setText("暂时无法读取语言偏好，请稍后重新进入设置。")); }
+            } catch (Exception ignored) { onPage(expected, () -> status.setText("暂时无法读取播放偏好，请稍后重新进入设置。")); }
         });
-        actionButton(view, "保存语言偏好", false, () -> {
+        actionButton(view, "保存播放偏好", false, () -> {
             if (!ready[0] || api != connection) return;
             String first = LanguagePreferences.CODES[audio.getSelectedItemPosition()];
             String second = LanguagePreferences.CODES[subtitles.getSelectedItemPosition()];
+            boolean preferDefault = defaultAudio.isChecked();
+            ready[0] = false;
+            audio.setEnabled(false); subtitles.setEnabled(false); defaultAudio.setEnabled(false);
+            status.setText("正在保存播放偏好…");
             worker.execute(() -> {
                 try {
-                    connection.saveLanguagePreferences(first, second);
-                    onPage(expected, () -> { if (api == connection) status.setText("语言偏好已保存"); });
+                    connection.savePlaybackPreferences(first, second, preferDefault);
+                    onPage(expected, () -> { if (api == connection) status.setText("播放偏好已保存，下次播放生效"); });
                 } catch (Exception ignored) { onPage(expected, () -> status.setText("保存失败，请稍后重试")); }
+                finally { onPage(expected, () -> {
+                    if (api != connection) return;
+                    audio.setEnabled(true); subtitles.setEnabled(true); defaultAudio.setEnabled(true); ready[0] = true;
+                }); }
             });
         });
     }
