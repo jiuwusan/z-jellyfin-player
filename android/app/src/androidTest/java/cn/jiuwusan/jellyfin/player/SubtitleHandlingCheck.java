@@ -86,6 +86,7 @@ final class SubtitleHandlingCheck {
         volatile boolean languageScenario;
         volatile boolean includeLoginConfiguration;
         volatile JSONArray adjacentItems;
+        volatile JSONArray collectionItems;
         volatile JSONArray audioOverrides;
         volatile Integer defaultAudioOverride;
         volatile JSONArray subtitleOverrides;
@@ -117,6 +118,8 @@ final class SubtitleHandlingCheck {
                         response = "{}";
                     }
                     else if (first.startsWith("GET ") && first.contains("/Users/fixture ")) response = failConfigurationRead ? "{}" : new JSONObject().put("Configuration", configuration).toString();
+                    else if (first.contains("/Items?") && first.contains("ParentId=") && collectionItems != null)
+                        response = new JSONObject().put("Items", collectionItems).put("TotalRecordCount", collectionItems.length()).toString();
                     else if (first.contains("/Episodes?") && adjacentItems != null)
                         response = new JSONObject().put("Items", adjacentItems).toString();
                     else { bodies.add(request); response = playback(request).toString(); }

@@ -127,7 +127,9 @@ final class CollectionsUiCheck {
                 clickCard(selected.title);
                 waitText("合集详情"); waitText(expected.get(0));
                 ui(() -> {
-                    check(text(root(), "播放") == null && text(root(), "从头播放") == null, "Collection has direct playback action");
+                    View play = text(root(), "播放");
+                    check(play != null && play.isEnabled() && "播放合集".contentEquals(play.getContentDescription())
+                            && text(root(), "从头播放") == null, "Collection play action missing or duplicated");
                     List<String> actual = new ArrayList<>(); collect(root(), expected, actual);
                     check(actual.equals(expected), "Collection members changed server order");
                 });
@@ -149,7 +151,7 @@ final class CollectionsUiCheck {
                 ui(() -> check(Math.abs(scroll(root()).getScrollY() - outer[0]) <= 3, "Outer catalog scroll position lost"));
                 result.putString(prefix, "members=" + expected.size() + "; order/inner/outer restored");
             }
-            check(sealed.equals(activity.getSharedPreferences("connection", 0).getString("sealed", null)), "Saved settings changed");
+            check(java.util.Objects.equals(sealed, activity.getSharedPreferences("connection", 0).getString("sealed", null)), "Saved settings changed");
             result.putString("result", "ALL_PASS: real BoxSets / server member order / movie detail / inner+outer scroll / saved settings");
             test.finish(Activity.RESULT_OK, result);
         } catch (Throwable e) {

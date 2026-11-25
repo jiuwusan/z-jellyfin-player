@@ -91,6 +91,40 @@ final class PlaybackEndCheck {
         call(page, "onPlaybackEnded", new Class<?>[]{ExoPlayer.class, long.class, boolean.class}, player, start, sought);
     }
     private void discard() throws Exception { call(activity, "stopPlayback", new Class<?>[]{}); }
+    private void checkServerCollectionStart(SubtitleHandlingCheck.Fixture fixture) throws Exception {
+        JSONObject first = new JSONObject().put("Id", "watched-first").put("Name", "服务端已看完")
+                .put("Type", "Movie").put("UserData", new JSONObject().put("Played", true));
+        JSONObject second = new JSONObject().put("Id", "resume-second").put("Name", "第二部续播")
+                .put("Type", "Movie").put("UserData", new JSONObject().put("Played", false).put("PlaybackPositionTicks", 250_000_000L));
+        fixture.collectionItems = new org.json.JSONArray().put(first).put(second);
+        ui(() -> {
+            discard();
+            Constructor<?> progress = Class.forName(MainActivity.class.getName() + "$LocalProgress")
+                    .getDeclaredConstructor(JellyfinApi.Item.class, long.class, boolean.class);
+            progress.setAccessible(true);
+            java.util.Map local = (java.util.Map) get(activity, "localProgress");
+            local.put("watched-first", progress.newInstance(new JellyfinApi.Item(first), 5_000L, false));
+            local.put("resume-second", progress.newInstance(new JellyfinApi.Item(second), 1_000L, true));
+            Class<?> locationClass = Class.forName(MainActivity.class.getName() + "$LibraryLocation");
+            Constructor<?> location = locationClass.getDeclaredConstructor(JellyfinApi.Item.class, boolean.class);
+            location.setAccessible(true);
+            JellyfinApi.Item box = new JellyfinApi.Item(new JSONObject().put("Id", "box").put("Name", "测试合集").put("Type", "BoxSet"));
+            call(activity, "startCollection", new Class<?>[]{android.widget.TextView.class, locationClass, Runnable.class},
+                    new android.widget.TextView(activity), location.newInstance(box, false), (Runnable) () -> {});
+        });
+        java.util.concurrent.atomic.AtomicReference<Object> started = new java.util.concurrent.atomic.AtomicReference<>();
+        for (int i = 0; i < 100 && started.get() == null; i++) {
+            ui(() -> started.set(get(activity, "playback")));
+            if (started.get() == null) SystemClock.sleep(50);
+        }
+        check(started.get() != null, "Collection playback did not start");
+        ui(() -> {
+            JellyfinApi.Item target = (JellyfinApi.Item) get(started.get(), "item");
+            check("resume-second".equals(target.id) && target.resumeMs == 25_000,
+                    "Local cache overrode server watched state or second movie resume position");
+            discard();
+        });
+    }
     void run() {
         Bundle result = new Bundle();
         try (SubtitleHandlingCheck.Fixture fixture = new SubtitleHandlingCheck.Fixture()) {
@@ -177,11 +211,36 @@ final class PlaybackEndCheck {
             ui(() -> {
                 check(returns.get() == 2 && !((Boolean) get(page, "neighborsResolved")), "Failed neighbor query closed playback");
                 discard();
+                prepare("Movie", true);
+                JellyfinApi.Item first = (JellyfinApi.Item) get(page, "item");
+                JellyfinApi.Item second = new JellyfinApi.Item(new JSONObject().put("Id", "next-movie")
+                        .put("Name", "下一部电影").put("Type", "Movie"));
+                CollectionPlayback queue = new CollectionPlayback(java.util.Arrays.asList(first, second));
+                set(page, "collectionQueue", queue);
+                call(page, "loadNeighbors", new Class<?>[]{});
+                check(get(page, "next") == second && get(page, "previous") == null, "Collection neighbors lost order");
+                FullscreenPlaybackView screen = (FullscreenPlaybackView) get(page, "screen");
+                screen.setCollectionNavigation(true);
+                check("下一部".contentEquals(((android.widget.TextView) get(screen, "next")).getContentDescription()),
+                        "Collection navigation still uses episode labels");
+                ended(0, false);
+                check(get(page, "change") != null && get(get(page, "change"), "target") == second,
+                        "Collection movie end returned instead of advancing");
+                discard();
+                prepare("Movie", true);
+                JellyfinApi.Item last = (JellyfinApi.Item) get(page, "item");
+                set(page, "collectionQueue", new CollectionPlayback(java.util.Arrays.asList(second, last)));
+                call(page, "loadNeighbors", new Class<?>[]{});
+                check(get(page, "next") == null && get(page, "previous") == second, "Collection finale boundary incorrect");
+                ended(0, false); ended(0, false);
             });
+            test.waitForIdleSync();
+            check(returns.get() == 3, "Collection finale did not return exactly once");
             for (int i = 0; i < 100 && fixture.reports.size() < 4; i++) SystemClock.sleep(50);
             check(fixture.reports.stream().anyMatch(r -> "end-fixture".equals(r.optString("ItemId"))
                     && r.optLong("PositionTicks") == 100_000_000L), "Final position was not reported");
-            result.putString("result", "ALL_PASS: movie / delayed finale / next switch / missing-current / query failure / duplicate / seek / resume-end / pause / background / failure / buffering / canceled return / portrait / release / final report");
+            checkServerCollectionStart(fixture);
+            result.putString("result", "ALL_PASS: movie / delayed finale / next switch / missing-current / query failure / duplicate / seek / resume-end / pause / background / failure / buffering / canceled return / collection next+finale / server watched state overrides stale local cache / movie labels / portrait / release / final report");
             test.finish(Activity.RESULT_OK, result);
         } catch (Throwable error) {
             result.putString("failure", android.util.Log.getStackTraceString(error)); test.finish(Activity.RESULT_CANCELED, result);

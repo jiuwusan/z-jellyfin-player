@@ -1051,7 +1051,13 @@ public final class MainActivity extends Activity {
         int expected = page;
         view.setPadding(0, 0, 0, dp(24));
         Runnable render = () -> {
-            showDetails(view, location.details, back, null);
+            LinearLayout playbackArea = showDetails(view, location.details, back, null);
+            TextView play = detailPlaybackButton("播放", true, null);
+            play.setContentDescription("播放合集");
+            LinearLayout.LayoutParams actionBounds = new LinearLayout.LayoutParams(-1, -2);
+            actionBounds.topMargin = dp(12);
+            playbackArea.addView(play, actionBounds);
+            libraryUi.actionable(play, () -> startCollection(play, location, back));
             showLibraryPage(view, location, () -> collectionPage(location, back));
         };
         if (location.details != null) { render.run(); return; }
@@ -1071,6 +1077,35 @@ public final class MainActivity extends Activity {
                 onPage(expected, () -> {
                     pending.finish();
                     LoadingUi.failure(view, libraryUi, message(error, "读取合集失败"), () -> collectionPage(location, back), false);
+                });
+            }
+        });
+    }
+
+    private void startCollection(TextView button, LibraryLocation location, Runnable back) {
+        if (!button.isEnabled()) return;
+        JellyfinApi connection = api;
+        int expected = page;
+        button.setEnabled(false);
+        button.setText("正在准备…");
+        browse.execute(() -> {
+            try {
+                CollectionPlayback queue = CollectionPlayback.load(connection, location.folder);
+                onPage(expected, () -> {
+                    if (api != connection) return;
+                    button.setEnabled(true); button.setText("播放");
+                    // Collection entry follows the fresh server watched state, including near-end completion.
+                    JellyfinApi.Item target = queue.start();
+                    if (target == null) {
+                        Toast.makeText(this, "此合集中暂无可播放的电影", Toast.LENGTH_SHORT).show(); return;
+                    }
+                    playbackPage(target, null, () -> collectionPage(location, back), queue);
+                });
+            } catch (Exception error) {
+                onPage(expected, () -> {
+                    if (api != connection) return;
+                    button.setEnabled(true); button.setText("播放");
+                    Toast.makeText(this, "暂时无法读取合集，请重试", Toast.LENGTH_SHORT).show();
                 });
             }
         });
@@ -1290,7 +1325,7 @@ public final class MainActivity extends Activity {
         });
     }
 
-    private void showDetails(LinearLayout pageView, JellyfinApi.Item item, Runnable back, String seasonId) {
+    private LinearLayout showDetails(LinearLayout pageView, JellyfinApi.Item item, Runnable back, String seasonId) {
         pageView.setPadding(0, 0, 0, dp(24));
         int screenDp = Math.round(browsingWidthPixels / getResources().getDisplayMetrics().density);
         int coverHeight = Math.max(185, Math.min(228,
@@ -1351,6 +1386,7 @@ public final class MainActivity extends Activity {
         }
         if (!item.collection && item.played) watched(heading);
         LinearLayout playbackArea = column();
+        if (item.collection) playbackArea.setPadding(dp(posterWidth + 14), 0, 0, 0);
         ribbon.addView(playbackArea, new LinearLayout.LayoutParams(-1, -2));
         if (!item.series && !item.collection) {
             Runnable returnToDetails = () -> detailsPage(item, back);
@@ -1372,6 +1408,7 @@ public final class MainActivity extends Activity {
             overview.setPadding(0, 0, 0, dp(16));
         }
         if (item.series) showSeasons(view, playbackArea, item, back, seasonId);
+        return playbackArea;
     }
 
     private void detailPlaybackActions(LinearLayout heading, JellyfinApi.Item item, Runnable returnToDetails) {
@@ -1430,7 +1467,7 @@ public final class MainActivity extends Activity {
         icon.setBounds(0, 0, dp(26), dp(26));
         button.setCompoundDrawablesRelative(showIcon ? icon : null, null, null, null);
         button.setCompoundDrawablePadding(dp(6));
-        libraryUi.actionable(button, action);
+        if (action != null) libraryUi.actionable(button, action);
         return button;
     }
 
@@ -1782,6 +1819,10 @@ public final class MainActivity extends Activity {
     }
 
     private void playbackPage(JellyfinApi.Item item, Long startPosition, Runnable back) {
+        playbackPage(item, startPosition, back, null);
+    }
+
+    private void playbackPage(JellyfinApi.Item item, Long startPosition, Runnable back, CollectionPlayback collectionQueue) {
         if (subscriptionController != null && subscriptionController.blocked()) { showBlockedSubscription(); return; }
         rememberBrowsePosition();
         Runnable close = () -> {
@@ -1794,6 +1835,8 @@ public final class MainActivity extends Activity {
         PlaybackPolicy policy = PlaybackPolicy.fromSettings(settings.resolution, settings.bitrate,
                 metrics.widthPixels, metrics.heightPixels);
         PlaybackPage current = new PlaybackPage(item, policy, close);
+        current.collectionQueue = collectionQueue;
+        current.screen.setCollectionNavigation(collectionQueue != null);
         playback = current;
         setContentView(current.screen);
         enterFullscreenPlayback();
@@ -1809,6 +1852,7 @@ public final class MainActivity extends Activity {
         final FullscreenPlaybackView screen;
         final Runnable close;
         JellyfinApi.Item item, previous, next;
+        CollectionPlayback collectionQueue;
         PlaybackChange change;
         int subtitle = PlaybackTracks.AUTO;
         PlaybackTracks.LocalTrack localSubtitle;
@@ -1924,6 +1968,15 @@ public final class MainActivity extends Activity {
         void loadNeighbors() {
             previous = null;
             next = null;
+            if (collectionQueue != null) {
+                neighborsLoading = false;
+                neighborsResolved = collectionQueue.contains(item);
+                previous = collectionQueue.previous(item);
+                next = collectionQueue.next(item);
+                updateActions();
+                advanceAfterEnd();
+                return;
+            }
             neighborsResolved = "Movie".equals(item.type);
             neighborsLoading = episodic();
             updateActions();
@@ -1961,7 +2014,7 @@ public final class MainActivity extends Activity {
             boolean audio = enabled && (stream.hls ? !stream.audio.isEmpty()
                     : !PlaybackTracks.supported(player.getCurrentTracks(), C.TRACK_TYPE_AUDIO).isEmpty());
             boolean canChangeEpisode = subscriptionController == null || !subscriptionController.blocked();
-            screen.updateActions(episodic(), enabled && canChangeEpisode && previous != null,
+            screen.updateActions(episodic() || collectionQueue != null, enabled && canChangeEpisode && previous != null,
                     enabled && canChangeEpisode && next != null, enabled, audio);
         }
 
@@ -2179,7 +2232,8 @@ public final class MainActivity extends Activity {
                 });
                 return;
             }
-            Log.i(JellyfinApi.TAG, "Autoplay next season=" + next.season + " episode=" + next.index);
+            Log.i(JellyfinApi.TAG, "Autoplay next collection=" + (collectionQueue != null)
+                    + " season=" + next.season + " episode=" + next.index);
             changeEpisode(next);
         }
 

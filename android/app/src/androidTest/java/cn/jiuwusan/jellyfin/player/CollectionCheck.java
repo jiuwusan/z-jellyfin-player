@@ -67,6 +67,43 @@ final class CollectionCheck {
             check(query.queryParameter("CollapseBoxSetItems") == null, "Catalog forces collection folding");
             check("Descending,Ascending".equals(query.queryParameter("SortOrder")), "Catalog sort changed");
             result.putString("queries", "BoxSet catalog / direct members / server order / paging / server folding");
+            java.util.ArrayList<JSONObject> members = new java.util.ArrayList<>();
+            for (int i = 0; i < 39; i++) members.add(new JSONObject().put("Id", "member-" + i).put("Name", "成员" + i)
+                    .put("Type", i == 36 ? "Series" : "Movie")
+                    .put("UserData", new JSONObject().put("Played", i < 36).put("PlaybackPositionTicks", i == 37 ? 250_000_000L : 0)));
+            proxy.collectionRows = members;
+            Class<?> queueClass = Class.forName(JellyfinApi.class.getPackage().getName() + ".CollectionPlayback");
+            java.lang.reflect.Method load = queueClass.getDeclaredMethod("load", JellyfinApi.class, JellyfinApi.Item.class);
+            Object queue = load.invoke(null, api, box);
+            HttpUrl firstPage = proxy.take(), secondPage = proxy.take();
+            check("0".equals(firstPage.queryParameter("StartIndex")) && "36".equals(secondPage.queryParameter("StartIndex")),
+                    "Queue was limited to visible members or used filtered page offsets");
+            check(firstPage.queryParameter("SortBy") == null && "false".equals(firstPage.queryParameter("Recursive")),
+                    "Queue changed collection ordering or expanded nested content");
+            java.lang.reflect.Method start = queueClass.getDeclaredMethod("start");
+            java.lang.reflect.Method next = queueClass.getDeclaredMethod("next", JellyfinApi.Item.class);
+            java.lang.reflect.Method previous = queueClass.getDeclaredMethod("previous", JellyfinApi.Item.class);
+            JellyfinApi.Item selected = (JellyfinApi.Item) start.invoke(queue);
+            check(selected.id.equals("member-37") && selected.resumeMs == 25_000, "Queue lost first-unfinished resume target");
+            check(((JellyfinApi.Item) previous.invoke(queue, selected)).id.equals("member-35"), "Queue did not skip non-movie member");
+            JellyfinApi.Item last = (JellyfinApi.Item) next.invoke(queue, selected);
+            check(last.id.equals("member-38") && next.invoke(queue, last) == null, "Queue order or final boundary changed");
+            java.util.List<JellyfinApi.Item> movies = (java.util.List<JellyfinApi.Item>) field(queue, "items");
+            check(movies.size() == 38, "Queue included a series or omitted movie members");
+            for (JellyfinApi.Item movie : movies) { movie.played = true; movie.resumeMs = 0; }
+            check(((JellyfinApi.Item) start.invoke(queue)).id.equals("member-0"), "Completed collection did not restart at first movie");
+            check(previous.invoke(queue, start.invoke(queue)) == null, "First movie has an invalid previous member");
+            proxy.collectionRows = java.util.Collections.emptyList();
+            Object empty = load.invoke(null, api, box); proxy.take();
+            check(start.invoke(empty) == null, "Empty collection invented a playable target");
+            proxy.collectionRows = members; proxy.failCollectionTail = true;
+            boolean partialRejected = false;
+            try { load.invoke(null, api, box); }
+            catch (java.lang.reflect.InvocationTargetException expected) { partialRejected = true; }
+            proxy.take(); proxy.take();
+            check(partialRejected, "A failed trailing page silently started a partial queue");
+            proxy.failCollectionTail = false;
+            result.putString("playlist", "complete paging / server order / direct movies / resume / completed restart / boundaries / empty");
         }
     }
     private void probe(Bundle result) throws Exception {
@@ -163,6 +200,8 @@ final class CollectionCheck {
         final ServerSocket server = new ServerSocket(0, 10, java.net.InetAddress.getByName("127.0.0.1"));
         final LinkedBlockingQueue<HttpUrl> requests = new LinkedBlockingQueue<>();
         volatile boolean running = true;
+        volatile java.util.List<JSONObject> collectionRows;
+        volatile boolean failCollectionTail;
         ProxyProbe() throws Exception {
             Thread thread = new Thread(() -> {
                 while (running) try (Socket socket = server.accept()) {
@@ -176,6 +215,13 @@ final class CollectionCheck {
                     requests.add(url);
                     String body = url.encodedPath().endsWith("AuthenticateByName")
                             ? "{\"AccessToken\":\"fixture\",\"User\":{\"Id\":\"fixture\"}}" : "{\"Items\":[],\"TotalRecordCount\":0}";
+                    if (collectionRows != null && "box".equals(url.queryParameter("ParentId"))) {
+                        int offset = Integer.parseInt(url.queryParameter("StartIndex"));
+                        org.json.JSONArray rows = new org.json.JSONArray();
+                        for (int i = offset; i < Math.min(offset + 36, collectionRows.size()); i++) rows.put(collectionRows.get(i));
+                        body = new JSONObject().put("Items", rows).put("TotalRecordCount", collectionRows.size()).toString();
+                        if (failCollectionTail && offset > 0) body = "{}";
+                    }
                     byte[] data = body.getBytes(StandardCharsets.UTF_8);
                     socket.getOutputStream().write(("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: " + data.length + "\r\nConnection: close\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
                     socket.getOutputStream().write(data);

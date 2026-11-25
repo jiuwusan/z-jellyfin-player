@@ -344,6 +344,13 @@ final class FullscreenPlaybackView extends FrameLayout {
         quality.setContentDescription("播放画质上限 " + value);
     }
 
+    void setCollectionNavigation(boolean collection) {
+        previous.setText(collection ? "‹ 上一部" : "‹ 上一集");
+        previous.setContentDescription(collection ? "上一部" : "上一集");
+        next.setText(collection ? "下一部 ›" : "下一集 ›");
+        next.setContentDescription(collection ? "下一部" : "下一集");
+    }
+
     void updateActions(boolean episodic, boolean canGoBack, boolean canGoNext, boolean textAvailable,
                        boolean audioAvailable) {
         previous.setVisibility(episodic ? VISIBLE : GONE);
