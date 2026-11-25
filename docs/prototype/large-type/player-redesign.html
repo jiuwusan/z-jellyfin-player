@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>z-jellyfin · 全屏播放器新设计</title>
+<link rel="icon" href="../app-icon.png"><link rel="stylesheet" href="player-redesign.css">
+</head>
+<body>
+<svg class="symbols" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+ <symbol id="back" viewBox="0 0 24 24"><path d="m14 5-7 7 7 7"/></symbol>
+ <symbol id="play" viewBox="0 0 24 24"><path fill="currentColor" stroke="none" d="m8 4 13 8-13 8Z"/></symbol>
+ <symbol id="pause" viewBox="0 0 24 24"><path fill="currentColor" stroke="none" d="M6 4h4v16H6zM14 4h4v16h-4z"/></symbol>
+ <symbol id="rewind" viewBox="0 0 32 32"><path d="M7 9a12 12 0 1 1-2 13M7 3v7H0"/><text x="16" y="22" text-anchor="middle" stroke="none" fill="currentColor" font-size="14" font-family="system-ui" font-weight="600">5</text></symbol>
+ <symbol id="forward" viewBox="0 0 32 32"><path d="M25 9a12 12 0 1 0 2 13M25 3v7h7"/><text x="16" y="22" text-anchor="middle" stroke="none" fill="currentColor" font-size="14" font-family="system-ui" font-weight="600">15</text></symbol>
+ <symbol id="previous" viewBox="0 0 24 24"><path d="M5 5v14"/><path fill="currentColor" stroke="none" d="M19 5v14L8 12Z"/></symbol>
+ <symbol id="next" viewBox="0 0 24 24"><path d="M19 5v14"/><path fill="currentColor" stroke="none" d="M5 5v14l11-7Z"/></symbol>
+ <symbol id="captions" viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="3"/><path d="M10 9H7v6h3M18 9h-3v6h3"/></symbol>
+ <symbol id="audio" viewBox="0 0 24 24"><path d="M9 17V5l11-2v12M9 8l11-2"/><ellipse cx="6" cy="18" rx="3" ry="2"/><ellipse cx="17" cy="16" rx="3" ry="2"/></symbol>
+ <symbol id="check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+</svg>
+<div class="review">
+ <aside class="notes">
+  <a class="brand" href="home-resume.html"><img src="../logo.png" alt="">z-jellyfin</a>
+  <span class="eyebrow">播放器 · 新设计</span><h1>操作看得清<br>画面留给电影</h1>
+  <p>中央大按钮方案<br>仅交互设计，不连接服务器</p>
+  <fieldset><legend>播放内容</legend><div class="choices">
+   <button data-content="episode" aria-pressed="true">剧集</button><button data-content="collection" aria-pressed="false">电影合集</button><button data-content="movie" aria-pressed="false">普通电影</button>
+  </div></fieldset>
+  <fieldset><legend>预览状态</legend><div class="choices">
+   <button data-state="playing" aria-pressed="true">播放中</button><button data-state="paused" aria-pressed="false">已暂停</button><button data-state="buffering" aria-pressed="false">缓冲中</button>
+  </div></fieldset>
+  <button class="outline" id="show-controls">重新显示控制区</button>
+  <a class="outline focus-link" href="?focus=1">满屏预览 ↗</a>
+  <p class="rule">正常播放时，5 秒无操作隐藏控制区。轻点画面重新显示；暂停、缓冲、拖动和轨道菜单展开时保持显示。</p>
+  <p class="rule">操作区水平、垂直居中。字幕固定在画面底部，工具栏显隐时位置和字号不变，允许进度条临时覆盖字幕。关闭字幕位于菜单最后。</p>
+  <a class="old" href="home-resume.html?screen=player">查看原版设计 ↗</a>
+ </aside>
+ <main class="canvas">
+  <section class="player" aria-label="全屏播放器交互预览" data-state="playing">
+   <div class="scene" aria-hidden="true"><div class="art"></div></div>
+   <button class="surface" aria-label="显示或隐藏播放控制"></button>
+   <div class="shade controls" aria-hidden="true"></div>
+   <header class="header controls">
+    <a class="back tool" href="home-resume.html?screen=detail&item=detective" aria-label="返回详情"><svg><use href="#back"/></svg><span>返回</span></a>
+    <div class="heading"><h2 id="title">魅影神捕</h2><p id="episode">第2集 · 月下疑踪</p></div>
+    <nav class="tracks" aria-label="播放轨道"><button class="tool" id="subtitle" aria-expanded="false" aria-controls="track-menu"><svg><use href="#captions"/></svg><span>字幕</span></button><button class="tool" id="audio-track" aria-expanded="false" aria-controls="track-menu"><svg><use href="#audio"/></svg><span>音轨</span></button></nav>
+   </header>
+   <div class="central controls" aria-label="播放操作">
+    <button class="nav-button" id="previous-track"><svg><use href="#previous"/></svg><span>上一集</span></button>
+    <button class="skip" data-seek="-5"><svg><use href="#rewind"/></svg><span>后退 5 秒</span></button>
+    <button class="toggle" id="toggle" aria-label="暂停"><svg><use href="#pause"/></svg><span class="sr">暂停</span></button>
+    <button class="skip" data-seek="15"><svg><use href="#forward"/></svg><span>前进 15 秒</span></button>
+    <button class="nav-button" id="next-track"><svg><use href="#next"/></svg><span>下一集</span></button>
+   </div>
+   <div class="caption" aria-label="字幕示例">雨停之前，谁也不能离开这里。</div>
+   <footer class="bottom controls">
+    <div class="time-row"><span class="time"><strong id="elapsed">32:41</strong><span class="time-divider"> / </span><span id="duration">46:20</span></span><span class="buffer" hidden role="status"><span class="spinner"></span><span>正在缓冲</span></span><span class="quality">1080p <span>·</span> 4 Mbps</span></div>
+    <input id="timeline" type="range" min="0" max="2780" value="1961" aria-label="播放进度">
+    <span class="sr" id="sequence">第 2 集 / 共 3 集</span>
+   </footer>
+   <section class="track-menu" id="track-menu" aria-label="字幕选项" hidden><div class="track-options"></div></section>
+   <div class="feedback" role="status" hidden></div>
+  </section>
+  <div class="caption-note"><span>横屏全屏 · 大字与大触控区域</span><span>点击画面或按空格体验播放控制</span></div>
+ </main>
+</div>
+<script src="player-redesign.js"></script>
+</body>
+</html>

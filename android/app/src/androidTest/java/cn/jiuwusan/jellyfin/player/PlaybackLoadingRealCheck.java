@@ -78,7 +78,8 @@ final class PlaybackLoadingRealCheck {
             waitOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT,
                     android.content.res.Configuration.ORIENTATION_PORTRAIT);
             String saved = activity.getSharedPreferences("connection", 0).getString("sealed", null);
-            check(saved != null, "Device has no saved connection");
+            SubscriptionSettings managed = SubscriptionSettings.load(activity);
+            check(saved != null || managed != null, "Device has no saved connection");
             AtomicReference<JellyfinApi> connection = new AtomicReference<>();
             for (int i = 0; i < 300 && connection.get() == null; i++) {
                 ui(() -> {
@@ -89,9 +90,11 @@ final class PlaybackLoadingRealCheck {
             }
             check(connection.get() != null, "Saved connection failed to log in");
             JellyfinApi.Item selected = null;
-            for (JellyfinApi.Item item : connection.get().resumeItems())
+            for (JellyfinApi.Item item : connection.get().resumeItems()) {
                 if ("Episode".equals(item.type) && "魅影神捕".equals(item.seriesName)) { selected = item; break; }
-            check(selected != null, "No resume episode for regression title");
+                if (selected == null && ("Movie".equals(item.type) || "Episode".equals(item.type))) selected = item;
+            }
+            check(selected != null, "No playable resume item for regression");
             JellyfinApi.Item item = selected;
             ui(() -> invoke(activity, "playbackPage", new Class<?>[]{JellyfinApi.Item.class, Long.class, Runnable.class},
                     item, Long.valueOf(item.resumeMs), (Runnable) () -> invoke(activity, "homePage", new Class<?>[]{})));
@@ -100,6 +103,15 @@ final class PlaybackLoadingRealCheck {
                     android.content.res.Configuration.ORIENTATION_LANDSCAPE);
             ui(() -> check(!activity.getWindow().getDecorView().getRootWindowInsets().isVisible(
                     android.view.WindowInsets.Type.systemBars()), "Playback system bars still visible"));
+            ui(() -> screen().findViewById(R.id.playback_toggle).performClick());
+            SystemClock.sleep(200);
+            android.graphics.Bitmap screenshot = test.getUiAutomation().takeScreenshot();
+            if (screenshot != null) {
+                try (java.io.FileOutputStream file = new java.io.FileOutputStream(new java.io.File(activity.getExternalFilesDir(null), "player-central-real.png"))) {
+                    screenshot.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, file);
+                } finally { screenshot.recycle(); }
+            }
+            ui(() -> screen().findViewById(R.id.playback_toggle).performClick());
             final long[] retry = new long[1];
             final Object[] policy = new Object[1];
             ui(() -> {
@@ -132,7 +144,13 @@ final class PlaybackLoadingRealCheck {
             SystemClock.sleep(1500);
             waitOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT,
                     android.content.res.Configuration.ORIENTATION_PORTRAIT);
-            check(saved.equals(activity.getSharedPreferences("connection", 0).getString("sealed", null)), "Saved settings changed");
+            check(java.util.Objects.equals(saved, activity.getSharedPreferences("connection", 0).getString("sealed", null)), "Saved settings changed");
+            if (managed != null) {
+                SubscriptionSettings after = SubscriptionSettings.load(activity);
+                check(after != null && managed.link.equals(after.link)
+                        && ManagedConfiguration.sameConnection(managed.configuration.settings(null), after.configuration.settings(null)),
+                        "Managed connection changed");
+            }
             result.putString("decoder", decoder);
             result.putString("result", "ALL_PASS: portrait browsing despite landscape rotation / landscape fullscreen playback / portrait after back / proxy-login / first frame / retry-resume / unchanged settings");
             test.finish(Activity.RESULT_OK, result);

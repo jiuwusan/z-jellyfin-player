@@ -4,6 +4,8 @@ import android.content.Context;
 import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.Drawable;
+import android.graphics.drawable.LayerDrawable;
 import android.os.Build;
 import android.text.TextUtils;
 import android.util.TypedValue;
@@ -44,7 +46,7 @@ final class FullscreenPlaybackView extends FrameLayout {
     private final ScrollView trackScroll;
     private final TrackBubbleDrawable trackBubble;
     private final FrameLayout transportRow;
-    private final LinearLayout counters;
+    private final LinearLayout counters, transport, bufferingStatus;
     private final TextView title, subtitle, message, time, quality, play, rewind, forward;
     private final TextView previous, next, subtitles, audio;
     private final DefaultTimeBar timeline;
@@ -66,8 +68,6 @@ final class FullscreenPlaybackView extends FrameLayout {
     private void revealPreparationSlow() {
         if (preparing && !preparationFailed) preparationSlow.setVisibility(VISIBLE);
     }
-    private final int[] captionLocation = new int[2];
-    private final int[] bottomLocation = new int[2];
     private Player player;
     private View activeTrackButton;
     private boolean controlsVisible = true;
@@ -129,9 +129,9 @@ final class FullscreenPlaybackView extends FrameLayout {
         header.setBackground(shade(GradientDrawable.Orientation.TOP_BOTTOM, 0xe8020507, Color.TRANSPARENT));
         addView(header, new LayoutParams(-1, -2, Gravity.TOP));
 
-        TextView back = control("‹", "返回", close);
-        back.setTextSize(29);
-        header.addView(back, new LinearLayout.LayoutParams(dp(56), dp(56)));
+        TextView back = control("返回", "返回", close);
+        plainIcon(back, R.drawable.ic_back, 24);
+        header.addView(back, new LinearLayout.LayoutParams(-2, dp(56)));
         LinearLayout titleBlock = style.column();
         title = singleLine("", 26, LibraryUi.TEXT, true);
         subtitle = singleLine("", 18, LIGHT_TEXT, false);
@@ -140,8 +140,10 @@ final class FullscreenPlaybackView extends FrameLayout {
         LinearLayout.LayoutParams titleBounds = new LinearLayout.LayoutParams(0, -2, 1);
         titleBounds.setMarginStart(dp(11));
         header.addView(titleBlock, titleBounds);
-        subtitles = addControl(header, "CC  字幕", "字幕", subtitleMenu);
-        audio = addControl(header, "♪  音轨", "音轨", audioMenu);
+        subtitles = addControl(header, "字幕", "字幕", subtitleMenu);
+        plainIcon(subtitles, R.drawable.ic_player_subtitles, 26);
+        audio = addControl(header, "音轨", "音轨", audioMenu);
+        plainIcon(audio, R.drawable.ic_player_audio, 26);
 
         bottom = style.column();
         bottom.setBackground(shade(GradientDrawable.Orientation.TOP_BOTTOM, Color.TRANSPARENT, 0xf5020507));
@@ -153,37 +155,46 @@ final class FullscreenPlaybackView extends FrameLayout {
         timeline.setBufferedColor(0x9affffff);
         timeline.setUnplayedColor(0x60ffffff);
         timeline.setKeyTimeIncrement(5_000);
-        bottom.addView(timeline, new LinearLayout.LayoutParams(-1, dp(44)));
         bindScrubbing();
 
         transportRow = new FrameLayout(context);
-        bottom.addView(transportRow, new LinearLayout.LayoutParams(-1, -2));
+        addView(transportRow, new LayoutParams(-1, dp(104), Gravity.TOP));
         counters = new LinearLayout(context);
+        counters.setGravity(Gravity.CENTER_VERTICAL);
         time = singleLine("0:00 / —", 20, LibraryUi.TEXT, false);
         time.setId(R.id.playback_elapsed);
         quality = singleLine(qualityLimit, 18, LIGHT_TEXT, false);
         quality.setGravity(Gravity.END);
         quality.setContentDescription("播放画质上限 " + qualityLimit);
         counters.addView(time, new LinearLayout.LayoutParams(0, -2, 1));
+        bufferingStatus = new LinearLayout(context);
+        bufferingStatus.setGravity(Gravity.CENTER_VERTICAL);
+        ProgressBar bufferingSpinner = new ProgressBar(context);
+        bufferingSpinner.setIndeterminateTintList(ColorStateList.valueOf(LibraryUi.ACCENT_LIGHT));
+        bufferingStatus.addView(bufferingSpinner, new LinearLayout.LayoutParams(dp(18), dp(18)));
+        TextView bufferingText = singleLine("缓冲中", 16, LIGHT_TEXT, false);
+        bufferingText.setPadding(dp(6), 0, dp(6), 0);
+        bufferingStatus.addView(bufferingText);
+        bufferingStatus.setVisibility(GONE);
+        counters.addView(bufferingStatus);
         counters.addView(quality, new LinearLayout.LayoutParams(0, -2, 1));
-        transportRow.addView(counters, new LayoutParams(-1, -2, Gravity.CENTER_VERTICAL));
+        bottom.addView(counters, new LinearLayout.LayoutParams(-1, -2));
+        bottom.addView(timeline, new LinearLayout.LayoutParams(-1, dp(44)));
 
-        LinearLayout transport = new LinearLayout(context);
+        transport = new LinearLayout(context);
         transport.setGravity(Gravity.CENTER_VERTICAL);
-        transportRow.addView(transport, new LayoutParams(-2, -2, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL));
-        previous = addControl(transport, "‹ 上一集", "上一集", previousEpisode);
-        rewind = addControl(transport, "−5 秒", "后退 5 秒", () -> seekBy(-5_000));
+        transportRow.addView(transport, new LayoutParams(-2, -1, Gravity.CENTER));
+        previous = addTransport("上一集", "上一集", R.drawable.ic_player_previous, 32, previousEpisode);
+        rewind = addTransport("后退5秒", "后退 5 秒", R.drawable.ic_player_rewind, 40, () -> seekBy(-5_000));
         play = control("", "播放", this::togglePlaying);
         play.setId(R.id.playback_toggle);
         play.setTextColor(0xff0a2531);
-        play.setTextSize(24);
-        play.setBackground(style.rounded(0xffecf8fc, 33));
+        play.setBackground(style.rounded(0xffecf8fc, 48));
         play.setClipToOutline(true);
-        LinearLayout.LayoutParams playBounds = new LinearLayout.LayoutParams(dp(66), dp(66));
-        playBounds.setMarginStart(dp(8));
+        LinearLayout.LayoutParams playBounds = new LinearLayout.LayoutParams(dp(96), dp(96));
         transport.addView(play, playBounds);
-        forward = addControl(transport, "+15 秒", "前进 15 秒", () -> seekBy(15_000));
-        next = addControl(transport, "下一集 ›", "下一集", nextEpisode);
+        forward = addTransport("前进15秒", "前进 15 秒", R.drawable.ic_player_forward, 40, () -> seekBy(15_000));
+        next = addTransport("下一集", "下一集", R.drawable.ic_player_next, 32, nextEpisode);
 
         message = style.label("", 20, LibraryUi.TEXT, false);
         message.setGravity(Gravity.CENTER);
@@ -308,6 +319,29 @@ final class FullscreenPlaybackView extends FrameLayout {
         return button;
     }
 
+    private void plainIcon(TextView button, int resource, int size) {
+        Drawable icon = getContext().getDrawable(resource).mutate();
+        icon.setTint(LibraryUi.TEXT);
+        icon.setBounds(0, 0, dp(size), dp(size));
+        button.setCompoundDrawablesRelative(icon, null, null, null);
+        button.setCompoundDrawablePadding(dp(8));
+        button.setBackgroundColor(Color.TRANSPARENT);
+    }
+
+    private TextView addTransport(String label, String description, int resource, int size, Runnable action) {
+        TextView button = control(label, description, action);
+        Drawable icon = getContext().getDrawable(resource).mutate();
+        icon.setTint(LibraryUi.TEXT);
+        icon.setBounds(0, 0, dp(size), dp(size));
+        button.setCompoundDrawables(null, icon, null, null);
+        button.setCompoundDrawablePadding(dp(6));
+        button.setBackgroundColor(Color.TRANSPARENT);
+        button.setPadding(0, 0, 0, 0);
+        button.setShadowLayer(dp(2), 0, dp(1), Color.BLACK);
+        transport.addView(button, new LinearLayout.LayoutParams(dp(100), -1));
+        return button;
+    }
+
     private GradientDrawable outline(int color, int border, int radius) {
         GradientDrawable drawable = style.rounded(color, radius);
         drawable.setStroke(dp(1), border);
@@ -345,9 +379,9 @@ final class FullscreenPlaybackView extends FrameLayout {
     }
 
     void setCollectionNavigation(boolean collection) {
-        previous.setText(collection ? "‹ 上一部" : "‹ 上一集");
+        previous.setText(collection ? "上一部" : "上一集");
         previous.setContentDescription(collection ? "上一部" : "上一集");
-        next.setText(collection ? "下一部 ›" : "下一集 ›");
+        next.setText(collection ? "下一部" : "下一集");
         next.setContentDescription(collection ? "下一部" : "下一集");
     }
 
@@ -359,6 +393,7 @@ final class FullscreenPlaybackView extends FrameLayout {
         desiredNext = canGoNext;
         desiredText = textAvailable;
         desiredAudio = audioAvailable;
+        fitTransport();
         applyPreparationGate();
         transportEnabled = textAvailable;
         refreshControls();
@@ -498,8 +533,17 @@ final class FullscreenPlaybackView extends FrameLayout {
 
     private void setPlayingIcon(boolean playing) {
         String label = playing ? "暂停" : "播放";
-        if (TextUtils.equals(play.getContentDescription(), label) && play.length() > 0) return;
-        play.setText(playing ? "Ⅱ" : "▶");
+        if (TextUtils.equals(play.getContentDescription(), label) && play.getBackground() instanceof LayerDrawable) return;
+        Drawable icon = getContext().getDrawable(playing ? R.drawable.ic_player_pause : R.drawable.ic_player_play).mutate();
+        icon.setTint(0xff0c202a);
+        GradientDrawable circle = new GradientDrawable();
+        circle.setShape(GradientDrawable.OVAL);
+        circle.setColor(0xfff3fbff);
+        LayerDrawable layers = new LayerDrawable(new Drawable[] {circle, icon});
+        layers.setLayerSize(1, dp(38), dp(38));
+        layers.setLayerGravity(1, Gravity.CENTER);
+        play.setText("");
+        play.setBackground(layers);
         play.setContentDescription(label);
     }
 
@@ -509,6 +553,9 @@ final class FullscreenPlaybackView extends FrameLayout {
     }
 
     private void refreshControls() {
+        transportRow.setVisibility(controlsVisible && !preparing && message.getVisibility() != VISIBLE ? VISIBLE : INVISIBLE);
+        bufferingStatus.setVisibility(!preparing && player != null && player.getPlayWhenReady()
+                && player.getPlaybackState() == Player.STATE_BUFFERING ? VISIBLE : GONE);
         boolean seekable = canSeek();
         if (timeline.isEnabled() != seekable) timeline.setEnabled(seekable);
         timeline.setAlpha(preparing ? .45f : 1f);
@@ -635,8 +682,9 @@ final class FullscreenPlaybackView extends FrameLayout {
 
     private void setControlsVisible(boolean visible) {
         controlsVisible = visible;
-        header.setVisibility(visible ? VISIBLE : GONE);
-        bottom.setVisibility(visible ? VISIBLE : GONE);
+        header.setVisibility(visible ? VISIBLE : INVISIBLE);
+        bottom.setVisibility(visible ? VISIBLE : INVISIBLE);
+        transportRow.setVisibility(visible && !preparing && message.getVisibility() != VISIBLE ? VISIBLE : INVISIBLE);
         describeTouchSurface();
         post(this::liftCaptions);
         restartRefresh();
@@ -650,23 +698,51 @@ final class FullscreenPlaybackView extends FrameLayout {
     private void fitSafeArea() {
         int gutter = dp(18);
         boolean shortScreen = preparing && getHeight() - topInset - bottomInset < dp(420);
-        header.setPadding(gutter + leftInset, dp(14) + topInset, gutter + rightInset, dp(shortScreen ? 10 : 20));
+        header.setPadding(gutter + leftInset, dp(10) + topInset, gutter + rightInset, dp(10));
         bottom.setPadding(gutter + leftInset, 0, gutter + rightInset, dp(shortScreen ? 10 : 14) + bottomInset);
         LinearLayout.LayoutParams timeBounds = (LinearLayout.LayoutParams) timeline.getLayoutParams();
         timeBounds.height = dp(shortScreen ? 24 : 44);
         timeline.setLayoutParams(timeBounds);
         fitPreparation();
-        boolean compact = getWidth() - leftInset - rightInset < dp(545);
-        transportRow.setMinimumHeight(dp(100));
-        LayoutParams counterBounds = (LayoutParams) counters.getLayoutParams();
-        counterBounds.gravity = Gravity.TOP;
-        counters.setLayoutParams(counterBounds);
+        fitTransport();
         LayoutParams panelBounds = (LayoutParams) trackPanel.getLayoutParams();
         panelBounds.topMargin = topInset + dp(86);
         panelBounds.setMarginEnd(gutter + rightInset);
         panelBounds.width = Math.max(dp(160), Math.min(dp(360), getWidth() - leftInset - rightInset - 2 * gutter));
         trackPanel.setLayoutParams(panelBounds);
         fitTrackList();
+    }
+
+    private void fitTransport() {
+        if (getWidth() <= 0 || getHeight() <= 0) return;
+        int available = getWidth() - 2 * Math.max(leftInset, rightInset) - dp(36);
+        boolean compact = available < dp(560);
+        boolean shortScreen = getHeight() - topInset - bottomInset < dp(420);
+        int side = dp(shortScreen ? compact ? 72 : 80 : 96);
+        int nav = dp(compact ? 64 : 76), skip = dp(compact ? 92 : 108);
+        int count = previous.getVisibility() == VISIBLE ? 5 : 3;
+        int total = side + 2 * skip + (count == 5 ? 2 * nav : 0);
+        int gap = Math.max(0, Math.min(dp(32), (available - total) / (count - 1)));
+        int height = dp(shortScreen ? 80 : 104);
+        LayoutParams row = (LayoutParams) transportRow.getLayoutParams();
+        // Keep the action group at the picture's geometric center, even with an asymmetric cutout.
+        row.gravity = Gravity.CENTER;
+        row.leftMargin = 0; row.rightMargin = 0;
+        row.height = height;
+        row.topMargin = 0; row.bottomMargin = 0;
+        transportRow.setLayoutParams(row);
+        boolean first = true;
+        for (int i = 0; i < transport.getChildCount(); i++) {
+            TextView button = (TextView) transport.getChildAt(i);
+            if (button.getVisibility() == GONE) continue;
+            int width = button == play ? side : button == previous || button == next ? nav : skip;
+            LinearLayout.LayoutParams bounds = (LinearLayout.LayoutParams) button.getLayoutParams();
+            bounds.width = width; bounds.height = button == play ? side : -1;
+            bounds.setMarginStart(first ? 0 : gap); bounds.gravity = Gravity.CENTER_VERTICAL;
+            button.setLayoutParams(bounds);
+            if (button != play) button.setTextSize(shortScreen ? 18 : 20);
+            first = false;
+        }
     }
 
     private void fitPreparation() {
@@ -687,17 +763,10 @@ final class FullscreenPlaybackView extends FrameLayout {
         SubtitleView captions = video.getSubtitleView();
         if (captions == null || captions.getHeight() == 0) return;
         int fullHeight = captions.getHeight();
-        int inset = 0;
-        if (controlsVisible && bottom.getHeight() > 0) {
-            captions.getLocationInWindow(captionLocation);
-            bottom.getLocationInWindow(bottomLocation);
-            int overlap = captionLocation[1] + fullHeight - bottomLocation[1];
-            inset = Math.min(fullHeight / 2, Math.max(0, overlap + dp(3)));
-        }
-        if (captions.getPaddingBottom() != inset) captions.setPadding(0, 0, 0, inset);
+        // Keep captions at the video's normal bottom position; controls may temporarily cover them.
+        if (captions.getPaddingBottom() != 0) captions.setPadding(0, 0, 0, 0);
         captions.setFixedTextSize(TypedValue.COMPLEX_UNIT_PX, Math.max(fullHeight * SubtitleView.DEFAULT_TEXT_SIZE_FRACTION, android.util.TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 28, getResources().getDisplayMetrics())));
-        float defaultGap = fullHeight * SubtitleView.DEFAULT_BOTTOM_PADDING_FRACTION;
-        captions.setBottomPaddingFraction(Math.max(0, defaultGap - inset) / (fullHeight - inset));
+        captions.setBottomPaddingFraction(SubtitleView.DEFAULT_BOTTOM_PADDING_FRACTION);
         updateCaptionCues();
     }
 
@@ -833,7 +902,7 @@ final class FullscreenPlaybackView extends FrameLayout {
     boolean dismissChoices() {
         if (activeTrackButton == null) return false;
         trackPanel.setVisibility(GONE);
-        activeTrackButton.setBackground(outline(CONTROL_BACKGROUND, CONTROL_BORDER, LibraryUi.RADIUS_CONTROL));
+        activeTrackButton.setBackgroundColor(Color.TRANSPARENT);
         activeTrackButton.requestFocus();
         activeTrackButton = null;
         restartControlsTimeout();
