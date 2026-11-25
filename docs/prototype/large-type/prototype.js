@@ -25,7 +25,7 @@ const latest=["lighthouse","n2","ep4","palace","desert","forest"];
 const next=["n3","p2","ep2"];
 const records={ep1:1961,forest:1098,lighthouse:314,n2:2500};
 // Preview fixture only; no App or server state is changed.
-if(document.documentElement.dataset.homePreview==="latest"||new URLSearchParams(location.search).get("resume")==="empty") Object.keys(records).forEach(id=>delete records[id]);
+if(["latest","next"].includes(document.documentElement.dataset.homePreview)||new URLSearchParams(location.search).get("resume")==="empty") Object.keys(records).forEach(id=>delete records[id]);
 // Jellyfin Web v10.11.11 playback settings use width and bits per second.
 const resolutions=[["0","自动"],["-1","屏幕分辨率"],["640","360p"],["852","480p"],
  ["1280","720p"],["1920","1080p"],["3840","4K"],["7680","8K"]];
@@ -38,7 +38,8 @@ const initialSettings={host:"proxy.example.net",port:"8080",proxyUser:"family",p
 let saved={...initialSettings};
 let pendingSettings=null;
 const previewParams=new URLSearchParams(location.search);
-if(document.documentElement.dataset.homePreview==="latest") previewParams.set("resume","empty");
+if(["latest","next"].includes(document.documentElement.dataset.homePreview)) previewParams.set("resume","empty");
+if(document.documentElement.dataset.homePreview==="latest") previewParams.set("next","empty");
 const initialScreen=previewParams.get("screen");
 const previewItem=previewParams.get("item");
 let current=initialScreen==="detail"
@@ -99,7 +100,7 @@ function section(title,markup,action=""){
 }
 function card(id,mode="poster"){
  const i=catalog[id], resume=mode==="resume", episode=Boolean(i.parent);
- const resumeStyle=resume||mode==="fallback";
+ const resumeStyle=resume||mode==="fallback"||mode==="latest";
  const landscape=resumeStyle||mode==="next-up";
  const homeCard=landscape||mode==="recent";
  const name=episode?parentName(i):i.name;
@@ -113,7 +114,7 @@ function card(id,mode="poster"){
  '<span class="resumeType">'+esc(type)+'</span>'+
  (episode?'<span class="resumeEpisode">'+esc(episodeNumber)+'</span>':"")+
  (resume?'<span class="watchTime">'+watchTime+'</span>'+progress(id):"")+
- (resumeStyle?'<button class="quickPlayHit" type="button" data-home-play="'+id+'" aria-label="'+esc((resume?"继续观看 ":"播放 ")+name)+'">'+'<svg class="quickPlayIcon" viewBox="0 0 34 34" aria-hidden="true"><path d="M12.5,9.5 L26,17 L12.5,24.5 Z"/></svg></button>':""): "";
+ (resumeStyle&&mode!=="latest"?'<button class="quickPlayHit" type="button" data-home-play="'+id+'" aria-label="'+esc((resume?"继续观看 ":"播放 ")+name)+'">'+'<svg class="quickPlayIcon" viewBox="0 0 34 34" aria-hidden="true"><path d="M12.5,9.5 L26,17 L12.5,24.5 Z"/></svg></button>':""): "";
  const content='<span class="cover '+(landscape?"landscape":"")+'">'+art(i.art)+coverInfo+'</span>'+
  '<span class="cardCopy"><span class="name">'+titleMarkup+'</span>'+
  (resumeStyle||landscape&&episode?"":'<span class="sub">'+esc(detail)+'</span>')+'</span>';
@@ -129,8 +130,10 @@ function homeCards(ids,mode){
 }
 function home(){
  const resumed=Object.keys(records).filter(id=>records[id]>0&&records[id]<catalog[id].length);
- return resumed.length?section("继续观看",homeCards(resumed,"resume"))
- :section("最近添加",latest.length?homeCards(latest,"fallback"):'<div class="empty">暂无可播放的影片。</div>');
+ if(resumed.length)return section("继续观看",homeCards(resumed,"resume"));
+ if(previewParams.get("next")!=="empty"&&next.length)return section("接下来",homeCards(next,"fallback"));
+ if(previewParams.get("latest")!=="empty"&&latest.length)return section("最近添加",homeCards(latest,"latest"));
+ return section("发现影片",'<div class="empty">暂无可观看的影片。<br><button class="primary" data-jump="library">前往媒体库</button></div>');
 }
 function library(){
  const selected=current.filter||"all", libraries=[{id:"all",name:"全部",items:tiles},...mediaLibraries];
@@ -239,7 +242,7 @@ function render(){
  if(page==="library")main.querySelector(".filters").scrollLeft=current.filterScroll||0;
  main.scrollTop=0;
  document.querySelectorAll(".jump[data-home-preview]").forEach(link=>{
-  const example=previewParams.get("resume")==="empty"?"latest":"resume";
+  const example=previewParams.get("resume")==="empty"?(previewParams.get("next")==="empty"?"latest":"next"):"resume";
   link.setAttribute("aria-current",page==="home"&&link.dataset.homePreview===example?"page":"false");
  });
  document.querySelectorAll("[data-jump]").forEach(button=>{

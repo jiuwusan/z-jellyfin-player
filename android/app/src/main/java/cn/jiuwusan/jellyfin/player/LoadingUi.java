@@ -222,7 +222,8 @@ final class LoadingUi {
         private int d(int value) { return style.dp(value); }
         @Override protected void onMeasure(int widthSpec, int heightSpec) {
             int width = MeasureSpec.getSize(widthSpec), height;
-            if (kind == Kind.HOME) height = d(56) + 2 * (width * 9 / 16 + d(64)) + d(20);
+            if (kind == Kind.HOME) height = style.largeUi() ? d(56) + 2 * (width * 9 / 16 + d(64)) + d(20)
+                    : Math.round(width*.86f*9/16 + width*.53f*9/16 + width*.30f*1.5f)+d(300);
             else if (kind == Kind.GRID) { int cols = style.gridColumns(width); int pw = (width - d(style.size(14,12)) * (cols - 1)) / cols; height = 2 * (pw * 3 / 2 + d(64)) + d(26); }
             else if (kind == Kind.EPISODES) height = d(330);
             else height = d(heroHeight() + 148 + 180 + 330);
@@ -246,7 +247,15 @@ final class LoadingUi {
             if (kind == Kind.HOME) {
                 box(canvas, 0, 0, d(142), d(33), 4);
                 float top = d(56);
-                for (int i = 0; i < 2; i++) {
+                if(!style.largeUi()) {
+                    float card=width*.86f, height=card*9/16;
+                    for(int i=0;i<2;i++) {float x=i*(card+d(12));box(canvas,x,top,card,height,6);box(canvas,x,top+height+d(12),card*.7f,d(18),4);}
+                    top+=height+d(80);box(canvas,0,top,d(100),d(26),4);top+=d(45);
+                    card=width*.53f;height=card*9/16;
+                    for(int i=0;i<3;i++){float x=i*(card+d(12));box(canvas,x,top,card,height,6);box(canvas,x,top+height+d(10),card*.7f,d(17),4);}
+                    top+=height+d(75);box(canvas,0,top,d(110),d(26),4);top+=d(45);card=width*.30f;
+                    for(int i=0;i<4;i++)box(canvas,i*(card+d(12)),top,card,card*1.5f,6);
+                } else for (int i = 0; i < 2; i++) {
                     box(canvas, 0, top, width, width * 9 / 16, 6);
                     box(canvas, d(14), top + width * 9 / 16 + d(19), width * .73f, d(23), 4);
                     top += width * 9 / 16 + d(style.size(84,66));

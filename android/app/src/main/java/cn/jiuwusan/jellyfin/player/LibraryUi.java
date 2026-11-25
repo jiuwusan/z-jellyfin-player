@@ -172,13 +172,24 @@ final class LibraryUi {
         }
     }
 
+    View feedCard(JellyfinApi.Item item, HomeFeed.Section section, int width, boolean elder,
+                  ItemAction details, ItemAction play) {
+        return card(item, elder || section != HomeFeed.Section.LATEST, section == HomeFeed.Section.RESUME,
+                true, elder || section == HomeFeed.Section.RESUME, width, () -> details.open(item),
+                section == HomeFeed.Section.LATEST ? null : () -> play.open(item));
+    }
+
     private View card(JellyfinApi.Item item, boolean wide, boolean progress, boolean homeCard,
                       int width, Runnable action, Runnable playback) {
-        boolean resumeStyle = homeCard && wide;
+        return card(item,wide,progress,homeCard,homeCard && wide,width,action,playback);
+    }
+
+    private View card(JellyfinApi.Item item, boolean wide, boolean progress, boolean homeCard,
+                      boolean resumeStyle, int width, Runnable action, Runnable playback) {
         int radius = resumeStyle ? RADIUS_PANEL : RADIUS_CONTROL;
         LinearLayout tile = column();
         tile.setTag(R.id.browse_item_id,item.id);
-        FrameLayout cover = picture(item, wide, resumeStyle ? 0 : radius, wide, false);
+        FrameLayout cover = picture(item, wide, resumeStyle ? 0 : radius, wide, false, homeCard && !wide);
         int imageWidth = width;
         if (resumeStyle) {
             GradientDrawable surface = rounded(SURFACE, radius);
@@ -264,17 +275,17 @@ final class LibraryUi {
                 episodeBounds.setMargins(dp(12), 0, dp(68), dp(progress ? size(54,42) : size(22,17)));
                 cover.addView(episodeLabel, episodeBounds);
             }
-            TextView type = label(item.series || !item.seriesName.isEmpty() ? "剧集" : "电影", size(18,11), TEXT, false);
+            TextView type = label(item.collection ? "合集" : item.series || !item.seriesName.isEmpty() ? "剧集" : "电影", size(18,11), TEXT, false);
             type.setPadding(dp(9), dp(3), dp(9), dp(3));
             type.setBackground(rounded(0xb0101010, RADIUS_SMALL));
             FrameLayout.LayoutParams typeBounds = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.END);
             typeBounds.setMargins(dp(12), dp(12), dp(12), 0);
             cover.addView(type, typeBounds);
-            addResumeIcon(cover, progress ? "继续观看 " + name : "播放 " + name, playback);
             tile.setContentDescription("查看详情 " + name
                     + (subtitle.isEmpty() ? "" : "，" + subtitle)
                     + (progress ? "，已观看 " + watchTime : ""));
         }
+        if(homeCard && playback != null) addResumeIcon(cover, progress ? "继续观看 " + name : "播放 " + name, playback, !resumeStyle);
         scrollActionable(tile, action);
         return tile;
     }
@@ -301,6 +312,11 @@ final class LibraryUi {
 
     private FrameLayout picture(JellyfinApi.Item item, boolean wide, int radius,
                                 boolean preferSeriesBackdrop, boolean originalWidth) {
+        return picture(item,wide,radius,preferSeriesBackdrop,originalWidth,false);
+    }
+
+    private FrameLayout picture(JellyfinApi.Item item, boolean wide, int radius,
+                                boolean preferSeriesBackdrop, boolean originalWidth, boolean preferSeriesPoster) {
         FrameLayout cover = new FrameLayout(context);
         cover.setBackground(rounded(PANEL, radius));
         cover.setClipToOutline(true);
@@ -308,7 +324,14 @@ final class LibraryUi {
         image.setScaleType(ImageView.ScaleType.CENTER_CROP);
         image.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         cover.addView(image, new FrameLayout.LayoutParams(-1, -1));
-        bindPicture(image, item, wide, preferSeriesBackdrop, originalWidth);
+        if(preferSeriesPoster && "Episode".equals(item.type) && !item.seriesId.isEmpty() && connection != null) {
+            JellyfinApi client=connection;
+            String key=item.seriesId+":primary:420:"+item.seriesPosterTag;
+            // Series identity/tag already arrived in the list; this performs only an image request.
+            if(item.hasPoster) artwork.bind(image,key,false,(width,height) -> client.primary(item.seriesId),
+                    artworkKey(item,false,false,false),(width,height) -> client.primary(item.id));
+            else artwork.bind(image,key,false,(width,height) -> client.primary(item.seriesId));
+        } else bindPicture(image, item, wide, preferSeriesBackdrop, originalWidth);
         return cover;
     }
 
@@ -394,7 +417,7 @@ final class LibraryUi {
         return poster;
     }
 
-    private void addResumeIcon(FrameLayout cover, String description, Runnable action) {
+    private void addResumeIcon(FrameLayout cover, String description, Runnable action, boolean compact) {
         FrameLayout hit = new FrameLayout(context);
         hit.setContentDescription(description);
         ImageView play = new ImageView(context);
@@ -403,12 +426,19 @@ final class LibraryUi {
         GradientDrawable badge = rounded(0x80101010, 22);
         badge.setStroke(dp(1), 0x38ffffff);
         play.setBackground(badge);
-        hit.addView(play, new FrameLayout.LayoutParams(dp(size(44,34)), dp(size(44,34)), Gravity.CENTER));
+        int diameter=dp(compact ? 26 : size(44,34));
+        hit.addView(play, new FrameLayout.LayoutParams(diameter, diameter, Gravity.CENTER));
         FrameLayout.LayoutParams bounds = new FrameLayout.LayoutParams(dp(size(56,48)), dp(size(56,48)), Gravity.BOTTOM | Gravity.END);
         bounds.setMarginEnd(dp(6));
-        bounds.bottomMargin = dp(14);
+        bounds.bottomMargin = dp(compact ? 0 : 14);
         cover.addView(hit, bounds);
         scrollActionable(hit, action);
+    }
+
+    void releasePictures(View view) {
+        if(view instanceof ImageView && artwork != null) { artwork.unbind((ImageView)view); ((ImageView)view).setImageDrawable(null); }
+        if(view instanceof android.view.ViewGroup) for(int i=0;i<((android.view.ViewGroup)view).getChildCount();i++)
+            releasePictures(((android.view.ViewGroup)view).getChildAt(i));
     }
 
     private void positionBar(FrameLayout frame, long position, long duration) {

@@ -59,6 +59,8 @@ public final class LoadingTransitionCheck extends Instrumentation {
         if (failure.get() != null) throw new AssertionError(failure.get());
     }
     @Override public void onStart() {
+        if ("latest-poster".equals(collectionSuite)) { new LatestPosterCheck(this).run(); return; }
+        if ("home-modes".equals(collectionSuite)) { new HomeModesCheck(this).run(); return; }
         if ("standard-ui-screens".equals(collectionSuite)) { new StandardUiRealCheck(this).screenshots(); return; }
         if ("ui-mode".equals(collectionSuite)) { new UiModeCheck(this).run(); return; }
         if ("fullscreen-standard".equals(collectionSuite)) { new FullscreenControlsCheck(this,true).run(); return; }

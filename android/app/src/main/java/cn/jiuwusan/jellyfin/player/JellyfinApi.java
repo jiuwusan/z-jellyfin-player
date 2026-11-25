@@ -171,9 +171,9 @@ final class JellyfinApi {
     }
 
     List<Item> nextItems() throws Exception {
-        return entries(json("读取接下来", url("Shows/NextUp").addQueryParameter("userId", userId)
+        return displayYears(entries(json("读取接下来", url("Shows/NextUp").addQueryParameter("userId", userId)
                 .addQueryParameter("enableResumable", "false").addQueryParameter("enableUserData", "true")
-                .addQueryParameter("limit", "16").build(), null).getJSONArray("Items"));
+                .addQueryParameter("limit", "16").build(), null).getJSONArray("Items")));
     }
 
     List<Item> latestItems() throws Exception {
@@ -277,6 +277,8 @@ final class JellyfinApi {
         return image(id, "Backdrop/0", originalWidth ? 0 : 640,
                 originalWidth ? displayWidth : 0, originalWidth ? displayHeight : 0);
     }
+
+    Bitmap primary(String id) throws IOException { return image(id, "Primary", 420); }
 
     private Bitmap image(String id, String type, int width, int displayWidth, int displayHeight) throws IOException {
         HttpUrl.Builder imageUrl = url("Items/" + id + "/Images/" + type).addQueryParameter("quality", "80");
@@ -651,7 +653,7 @@ final class JellyfinApi {
 
     static final class Item {
         final String id, title, seriesName, seriesId, seriesBackdropId, overview, type, collectionType;
-        final String posterTag, backdropTag, seriesBackdropTag;
+        final String posterTag, backdropTag, seriesBackdropTag, seriesPosterTag;
         final boolean series, collection, folder, hasPoster, hasBackdrop;
         final long durationMs;
         // Session-local progress is updated on the UI thread when playback stops.
@@ -686,6 +688,7 @@ final class JellyfinApi {
             JSONObject tags = entry.optJSONObject("ImageTags");
             hasPoster = tags != null && tags.has("Primary");
             posterTag = tags == null ? "" : tags.optString("Primary", "");
+            seriesPosterTag = entry.optString("SeriesPrimaryImageTag", "");
             JSONArray backdrops = entry.optJSONArray("BackdropImageTags");
             hasBackdrop = backdrops != null && backdrops.length() > 0;
             backdropTag = backdrops == null ? "" : backdrops.optString(0, "");

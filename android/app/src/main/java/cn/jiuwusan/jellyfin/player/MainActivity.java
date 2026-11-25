@@ -874,18 +874,22 @@ public final class MainActivity extends Activity {
 
     private HomeFeed.Result<JellyfinApi.Item> localHome(HomeFeed.Result<JellyfinApi.Item> cached) {
         List<JellyfinApi.Item> items = new ArrayList<>();
-        for (JellyfinApi.Item item : cached.items) {
+        for (JellyfinApi.Item item : cached.resumeItems) {
             withLocalProgress(item);
-            if (!cached.resume || item.resumeMs > 0 && !item.played) items.add(item);
+            if (item.resumeMs > 0 && !item.played) items.add(item);
         }
         for (LocalProgress progress : localProgress.values()) {
             if (progress.ended || progress.position <= 0) continue;
-            if (!cached.resume) items.clear();
             items.removeIf(item -> item.id.equals(progress.item.id));
             items.add(0, withLocalProgress(progress.item));
-            cached = new HomeFeed.Result<>(true, items);
         }
-        return new HomeFeed.Result<>(cached.resume, items);
+        List<JellyfinApi.Item> next = new ArrayList<>();
+        for(JellyfinApi.Item item:cached.nextItems) {
+            withLocalProgress(item);
+            if(!item.played && items.stream().noneMatch(resumed -> resumed.id.equals(item.id))) next.add(item);
+        }
+        for(JellyfinApi.Item item:cached.latestItems) withLocalProgress(item);
+        return new HomeFeed.Result<>(items, next, cached.latestItems);
     }
 
     private void homePage() {
@@ -959,6 +963,9 @@ public final class MainActivity extends Activity {
                         @Override public List<JellyfinApi.Item> latest() throws Exception {
                             return recentItems(connection.latestItems());
                         }
+                        @Override public List<JellyfinApi.Item> next() throws Exception {
+                            return connection.nextItems();
+                        }
                     });
                     onPage(expected, () -> {
                         if (pending != null) pending.finish();
@@ -974,8 +981,8 @@ public final class MainActivity extends Activity {
                         notice.clear();
                         if (first) LoadingUi.ready(view);
                         scroll.post(() -> { if (page == expected) scroll.scrollTo(0, requestedRefresh ? 0 : oldY); });
-                        Log.i(JellyfinApi.TAG, "Home section=" + (result.resume ? "RESUME" : "LATEST")
-                                + " items=" + result.items.size() + " refresh=" + requestedRefresh);
+                        Log.i(JellyfinApi.TAG, "Home resume="+result.resumeItems.size()+" next="+result.nextItems.size()
+                                +" latest="+result.latestItems.size()+" refresh="+requestedRefresh);
                     });
                 } catch (Exception error) {
                     onPage(expected, () -> {
@@ -991,29 +998,24 @@ public final class MainActivity extends Activity {
         }
 
         void render(HomeFeed.Result<JellyfinApi.Item> result) {
-            StringBuilder content = new StringBuilder(Boolean.toString(result.resume));
-            for (JellyfinApi.Item item : result.items) content.append('|').append(item.id).append(':')
-                    .append(item.resumeMs).append(':').append(item.played).append(':').append(item.title);
+            StringBuilder content = new StringBuilder(Boolean.toString(libraryUi.largeUi()));
+            for(HomeFeed.Section section:HomeFeed.Section.values()) {
+                content.append(section.name());
+                for(JellyfinApi.Item item:result.list(section)) content.append('|').append(item.id).append(':')
+                        .append(item.resumeMs).append(':').append(item.played).append(':').append(item.title);
+            }
             if (renderedContent.equals(content.toString())) return;
             renderedContent = content.toString();
-            view.removeAllViews();
-            TextView heading = libraryUi.label(result.resume ? "继续观看" : "最近添加", size(26,22), LibraryUi.TEXT, true);
-            heading.setPadding(0, 0, 0, dp(16));
-            if(libraryUi.largeUi()) view.addView(heading);
-            else {
-                LinearLayout headingRow=new LinearLayout(MainActivity.this); headingRow.setGravity(Gravity.CENTER_VERTICAL);
-                headingRow.setPadding(0,0,0,dp(17)); heading.setPadding(0,0,0,0);
-                headingRow.addView(heading,new LinearLayout.LayoutParams(0,-2,1));
-                headingRow.addView(libraryUi.label(result.items.size()+" 项",12,LibraryUi.MUTED,false));
-                view.addView(headingRow);
-            }
-            if (result.items.isEmpty()) LoadingUi.empty(view, libraryUi, "暂无可播放的影片", "续播记录和最近添加均为空。");
-            else view.addView(libraryUi.homeList(result.items, result.resume, screenWidth(),
-                    item -> openHomeDetails(item), item -> playHomeItem(item)));
+            HomeContent.render(view,libraryUi,result,screenWidth(),browseMemory,
+                    MainActivity.this::openHomeDetails,MainActivity.this::playHomeItem,MainActivity.this::librariesPage);
         }
     }
 
     private void openHomeDetails(JellyfinApi.Item item) {
+        if(item.collection) {
+            collectionPage(new LibraryLocation(item,false),this::homePage);
+            return;
+        }
         if ("Episode".equals(item.type) && item.seriesId.isEmpty()) {
             android.widget.Toast.makeText(this, "无法读取所属剧集，请刷新后重试。", android.widget.Toast.LENGTH_SHORT).show();
             return;

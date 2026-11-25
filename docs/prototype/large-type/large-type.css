@@ -179,3 +179,7 @@ h2 { font-size: 26px; line-height: 1.4; }
 .homeCardDetails { position: absolute; inset: 0; z-index: 2; background: transparent; border-radius: inherit; }
 .quickPlayHit { position: absolute; z-index: 3; bottom: 14px; right: 6px; width: 56px; height: 56px; display: grid; place-items: center; background: transparent; padding: 0; }
 .quickPlayHit .quickPlayIcon { position: static; width: 44px; height: 44px; }
+
+/* Elder home fallback remains readable without adding another feed. */
+.shell[data-screen="home"] .empty { font-size:22px; line-height:1.7; padding-block:30px; color:var(--muted,#b8b8b8); }
+.shell[data-screen="home"] .empty .primary { margin-top:18px; min-height:56px; }

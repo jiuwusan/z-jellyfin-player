@@ -63,6 +63,11 @@ final class StandardUiRealCheck {
         bitmap.recycle();
     }
     private RecycledMediaGrid grid(){return RecycledListDriver.find(root());}
+    private HomeRail homeRail(View view,HomeFeed.Section section){
+        if(view instanceof HomeRail&&((HomeRail)view).section==section)return (HomeRail)view;
+        if(view instanceof ViewGroup)for(int i=0;i<((ViewGroup)view).getChildCount();i++){HomeRail rail=homeRail(((ViewGroup)view).getChildAt(i),section);if(rail!=null)return rail;}
+        return null;
+    }
     void screenshots(){
         Bundle result=new Bundle();
         try {
@@ -99,7 +104,7 @@ final class StandardUiRealCheck {
             SubscriptionSettings saved=((SubscriptionController)field(activity,"subscriptionController")).state();
             check(managed.hasProxy()&&api.client().proxy()!=null&&api.client().proxy().type()==Proxy.Type.HTTP,"Saved subscription is not using an HTTP proxy");
             check(managed.resolution==1920&&managed.bitrate==4_000_000,"Saved quality differs from required probe ceiling");
-            AtomicInteger requests=new AtomicInteger(),images=new AtomicInteger(),hls=new AtomicInteger(),segments=new AtomicInteger(),listRequests=new AtomicInteger();
+            AtomicInteger requests=new AtomicInteger(),images=new AtomicInteger(),hls=new AtomicInteger(),segments=new AtomicInteger(),listRequests=new AtomicInteger(),nextRequests=new AtomicInteger();
             java.lang.reflect.Field http=JellyfinApi.class.getDeclaredField("http");http.setAccessible(true);
             http.set(api,api.client().newBuilder().addNetworkInterceptor(chain -> {
                 if(chain.connection()==null||chain.connection().route().proxy().type()!=Proxy.Type.HTTP)throw new java.io.IOException("Unexpected non-proxy route");
@@ -107,8 +112,18 @@ final class StandardUiRealCheck {
                 if(path.contains("/Images/"))images.incrementAndGet();else if(path.endsWith(".m3u8"))hls.incrementAndGet();
                 else if(path.endsWith(".ts")||path.endsWith(".m4s")||path.endsWith(".mp4"))segments.incrementAndGet();else requests.incrementAndGet();
                 if(path.endsWith("/Items"))listRequests.incrementAndGet();
+                if(path.endsWith("/Shows/NextUp")) {
+                    if(!"false".equals(chain.request().url().queryParameter("enableResumable")))throw new java.io.IOException("NextUp resumable policy changed");
+                    nextRequests.incrementAndGet();
+                }
                 return chain.proceed(chain.request());
             }).build());
+            BrowseMemory memory=(BrowseMemory)field(activity,"browseMemory");
+            ui(() -> { memory.remove("home");invoke("homePage",new Class<?>[]{}); });
+            waitFor(() -> memory.get("home")!=null,"Fresh three-section home did not load");
+            HomeFeed.Result<JellyfinApi.Item> home=memory.get("home");
+            check(nextRequests.get()>0,"Next Up did not use the managed proxy client");
+            out.putInt("resumeItems",home.resumeItems.size());out.putInt("nextItems",home.nextItems.size());out.putInt("latestItems",home.latestItems.size());
             ui(() -> { mode(true);invoke("homePage",new Class<?>[]{}); });
             test.waitForIdleSync();
             ui(() -> { ((android.widget.ScrollView)field(activity,"rememberedScroll")).scrollTo(0,0); mode(false);check(field(activity,"api")==api,"Display switch replaced API connection"); });
@@ -117,6 +132,30 @@ final class StandardUiRealCheck {
             ui(() -> invoke("homePage",new Class<?>[]{}));test.waitForIdleSync();SystemClock.sleep(250);
             ui(() -> { View title=text(root(),"继续观看");if(title==null)title=text(root(),"最近添加");check(title!=null&&title.getGlobalVisibleRect(new Rect()),"Density switch at page top hid the home heading"); });
             shot("home");
+            ui(() -> ((android.widget.ScrollView)field(activity,"rememberedScroll")).fullScroll(View.FOCUS_DOWN));
+            shot("home-bottom");
+            ui(() -> ((android.widget.ScrollView)field(activity,"rememberedScroll")).scrollTo(0,0));
+            int latestEpisode=-1;
+            for(int i=0;i<home.latestItems.size();i++)if("Episode".equals(home.latestItems.get(i).type)&&!home.latestItems.get(i).seriesId.isEmpty()){latestEpisode=i;break;}
+            check(latestEpisode>=0,"Latest episode routing fixture unavailable");
+            int episodeIndex=latestEpisode;JellyfinApi.Item latestItem=home.latestItems.get(episodeIndex);
+            ui(() -> {HomeRail rail=homeRail(root(),HomeFeed.Section.LATEST);check(rail!=null,"Latest rail missing");
+                ((androidx.recyclerview.widget.LinearLayoutManager)rail.getLayoutManager()).scrollToPositionWithOffset(episodeIndex,0);});
+            test.waitForIdleSync();SystemClock.sleep(300);
+            HomeRail.Position[] latestAnchor={null};
+            ui(() -> {
+                HomeRail rail=homeRail(root(),HomeFeed.Section.LATEST);View holder=rail.getLayoutManager().findViewByPosition(episodeIndex);
+                check(holder!=null,"Latest episode card was not bound");latestAnchor[0]=memory.get("homeRail:LATEST");
+                ((ViewGroup)holder).getChildAt(0).performClick();
+            });
+            waitFor(() -> memory.get("detail:"+latestItem.seriesId)!=null&&text(root(),"媒体详情")!=null,"Latest episode did not open its series detail");
+            ui(() -> {check(field(activity,"player")==null,"Latest episode unexpectedly played");activity.onBackPressed();});
+            waitFor(() -> homeRail(root(),HomeFeed.Section.LATEST)!=null,"Detail did not return to home");
+            test.waitForIdleSync();SystemClock.sleep(300);
+            ui(() -> {
+                HomeRail.Position restored=memory.get("homeRail:LATEST");check(restored!=null&&latestAnchor[0]!=null&&restored.id.equals(latestAnchor[0].id),"Latest detail return lost horizontal position");
+            });
+            out.putString("latestEpisodeRoute","series-detail / no playback / horizontal anchor retained");
             ui(() -> invoke("librariesPage",new Class<?>[]{}));
             waitFor(() -> grid()!=null && field(activity,"savedCatalog")!=null && Boolean.TRUE.equals(field(field(field(activity,"savedCatalog"),"selected"),"loaded")),"Library not loaded");
             ui(() -> check(((GridLayoutManager)grid().getLayoutManager()).getSpanCount()==3,"Standard library is not three columns"));

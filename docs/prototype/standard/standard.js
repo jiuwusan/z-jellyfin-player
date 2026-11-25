@@ -34,6 +34,7 @@
   };
   const libraries = [{id:'series',name:'电视剧',items:['detective','neon','palace','mountains','coast','wild']}, {id:'movies',name:'电影',items:['forest','lighthouse','desert','letter','return','south']}, {id:'collections',name:'电影系列',items:['journey']}];
   const records = {ep1:1961,forest:1098,lighthouse:314,n2:2500,desert:6900};
+  const nextUp = ['n3','p2','ep4'];
   const latest = ['lighthouse','ep4','n3','palace','desert','forest'];
   const preferences = {audio:'Chinese',subtitle:'Chinese',defaultAudio:false};
   let paused = false, menu = '', subtitle = '简体中文 · SRT', audio = '国语 · AAC 2.0';
@@ -79,10 +80,17 @@
     const item = media[id];
     return `<button class="poster-card" data-details="${id}" aria-label="查看 ${item.name} 详情"><span class="cover">${art(item.art)}${watched(id) ? watchedMark : ''}${item.type === 'collection' ? `<span class="collection-badge">${item.members.length} 部</span>` : ''}${number ? `<span class="episode-number">${String(number).padStart(2,'0')}</span>` : ''}</span><span class="poster-title">${escape(item.name)}</span><span class="poster-meta">${typeName(item.type)} · ${item.year}</span></button>`;
   }
+  function nextCard(id) {
+    const item=media[id], parent=media[item.parent || id];
+    return `<article class="next-card card"><span class="cover">${art(parent.art)}<span class="shade"></span><button class="quick-play" data-play="${id}" aria-label="播放 ${titleOf(id)} ${episodeLabel(item)}"><span>${icon('play')}</span></button></span><span class="next-title">${escape(titleOf(id))}</span><span class="next-meta">${episodeLabel(item)}</span><button class="card-details" data-details="${id}" aria-label="查看 ${titleOf(id)} 详情"></button></article>`;
+  }
   function home() {
-    const ids = Object.keys(records).filter(id => resume(id) > 0), fallback = ids.length === 0;
-    const feed = fallback ? latest : ids;
-    return `<div class="page-pad"><div class="section-heading"><h2>${fallback ? '最近添加' : '继续观看'}</h2><small>${feed.length} 项</small></div><div class="home-stack">${feed.map(id => resumeCard(id,fallback)).join('')}</div></div>`;
+    const ids = Object.keys(records).filter(id => resume(id) > 0);
+    const section=(title,items,kind,render)=>items.length ? `<section class="home-section"><div class="section-heading"><h2>${title}</h2></div><div class="rail home-rail ${kind}" tabindex="0" aria-label="${title}，可横向滑动">${items.map(render).join('')}</div></section>` : '';
+    return `<div class="page-pad home-page">${section('继续观看',ids,'resume-rail',id=>resumeCard(id).replace('resume-card ','resume-card card '))}${section('接下来',nextUp,'next-rail',nextCard)}${section('最近添加',latest,'latest-rail',id=>{
+      const item=media[id], parent=media[item.parent || id];
+      return `<article class="latest-card card"><span class="cover">${art(parent.art)}</span><span class="next-title">${escape(titleOf(id))}</span><span class="next-meta">${item.type==='episode'?episodeLabel(item):typeName(item.type)+' · '+item.year}</span><button class="card-details" data-details="${id}" aria-label="查看 ${titleOf(id)} 详情"></button></article>`;
+    })}</div>`;
   }
   function library() {
     const selected = libraries.find(item => item.id === state.library) || libraries[0];
